@@ -138,10 +138,13 @@ def _post(p):
             raise RuntimeError("The clip no longer exists or is not finished.")
         if not acc:
             raise RuntimeError("That account was disconnected.")
-        path = Path(job["dir"]) / "clips" / clip["file"]
+        from . import coverclip
+        path = coverclip.path_for(job, clip)          # with its chosen thumbnail as the first frame, when there is one
         creator = creators.get(job["creator"]) or dict(creators.DEFAULTS, name="clips")
         title, cap = clip.get("title") or clip.get("hook") or "Clip", _caption(clip, creator)
         cover, cover_ms = cover_for(job, clip)
+        if path.name != Path(str(clip["file"])).name:
+            cover_ms = 0                              # the thumbnail is the first frame: TikTok and Instagram use it as is
         note = ""
         if acc["platform"] == "youtube":
             rid, url = accounts.youtube_upload(acc, path, title, cap + "\n\n#Shorts", clip.get("hashtags", []), creator["privacy"])

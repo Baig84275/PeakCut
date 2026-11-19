@@ -2335,8 +2335,8 @@ function plainThumbsHtml(j, c) {
   const t = c.thumbs || {status: "none"}, m = `/media/${j.id}/`, f = D.tf || "v";
   if (c.status !== "done") return `<p class="help">Thumbnails can be made once the clip is ready.</p>`;
   if (t.status === "queued" || t.status === "making") return `<p class="help">${t.status === "queued" ? "Waiting its turn…" : "Making thumbnails… The AI is picking the best moments and writing the words."}</p>`;
-  const make = `<button class="btn" data-act="thumbmake">${ic("image")}${t.status === "done" ? "Make new ones" : "Make thumbnails"}</button>`;
-  if (t.status !== "done") return `${t.status === "error" ? `<p class="err">${esc(t.error || "Could not make thumbnails.")}</p>` : `<p class="help">Three eye-catching pictures for this clip: 9:16 for Shorts, Reels and TikTok, and 16:9 for YouTube. The AI picks the moment and writes the words.</p>`}${make}`;
+  const make = `<button class="btn" data-act="thumbmake">${ic("image")}${t.status === "done" ? "New quick ones" : "Quick thumbnails (free)"}</button>`;
+  if (t.status !== "done") return `${t.status === "error" ? `<p class="err">${esc(t.error || "Could not make thumbnails.")}</p>` : `<p class="help"><b>Quick thumbnails</b> (free): PeakCut cuts three from the clip's own frames and adds big words. For the full designed look (neon background, glowing face, banners, badge) use <b>Make AI thumbnail</b> above.</p>`}${make}`;
   const tiles = t.variants.map((v, i) => {
     const n = i + 1, on = t.chosen === n, file = v.files[f];
     return `<div class="tile ${on ? "on" : ""}">

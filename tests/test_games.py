@@ -93,7 +93,7 @@ s.manual.append({"start": 0.0, "end": 2.0})
 with patch.object(brain, "describe", side_effect=RuntimeError("The AI did not answer")):
     s._manual_step()
 check("a hand-picked clip is made when the AI fails", len(added), 1)
-check("it is made without a hook rather than not at all", added and added[0]["hook"], "")
+check("it still gets a plain hook and a title (never blank)", (added[0]["hook"], bool(added[0]["title"])), ("WAIT FOR IT", True))
 check("the failure is remembered", "AI did not answer" in (s.job["ai"]["last_error"] or ""), True)
 
 # ---- an eight-hour stream must not keep a name for every second of it

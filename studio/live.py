@@ -26,6 +26,15 @@ CHAT_KEEP = 600       # seconds of chat names kept: only the last few minutes ar
 SR = 16000
 
 
+def _name_fallback(c, job, hook):
+    """A clip never goes out without a hook and a title, even when the AI couldn't name it."""
+    if not (c.get("hook") or "").strip():
+        c["hook"] = hook
+    if not (c.get("title") or "").strip():
+        name = games.name_of(job.get("game")) if job.get("game") else ""
+        c["title"] = (f"{name}: {c['hook'].title()}" if name else f"{c['hook'].title()} | {job.get('uploader') or 'live'}")[:90]
+
+
 class NotLive(Exception):
     pass
 
@@ -551,6 +560,7 @@ class Session:
                  "highlight_words": []}
         c.update(start=round(start, 2), end=round(end, 2), score=max(int(c.get("score") or 0), 55),
                  reason=f"A big reaction ({why[6:]}).")
+        _name_fallback(c, self.job, "BIG REACTION")
         c["judges"] = {"words": verdict.get("transcript"), "reaction": None, "why": "Big reaction"}
         self._add_clip(c)
         return self._verdict(verdict, "Clipped: big reaction (" + why[6:] + ")")
@@ -598,6 +608,7 @@ class Session:
                      "description": "", "hashtags": [], "highlight_words": []}
             self.manual.remove(req)
             c.update(start=round(req["start"], 2), end=round(min(req["end"], self.samples / SR), 2), score=0)
+            _name_fallback(c, self.job, "WAIT FOR IT")
             if req.get("why"):
                 c["reason"] = req["why"]
             self._add_clip(c)

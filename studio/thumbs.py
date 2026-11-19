@@ -663,9 +663,10 @@ def drop_look(job, clip, n, fmt):
 
 def remove_files(job, cid):
     """Every thumbnail file of one clip (when the clip is deleted), AI-designed ones too."""
-    from . import aithumb
+    from . import aithumb, coverclip
     _remove(Path(job["dir"]) / "clips", cid)
     aithumb.remove_files(job, cid)
+    coverclip.remove_files(job, cid)
 
 
 def clip_changed(clip):

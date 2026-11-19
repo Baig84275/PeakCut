@@ -71,7 +71,8 @@ def main() -> int:
                 ("the paid AI look for thumbnails", ["tests/test_imagegen.py"]),
                 ("live streams in any language, and big reactions", ["tests/test_live_speech.py"]),
                 ("live clips move from their first frame", ["tests/test_live_seek.py"]),
-                ("AI-designed thumbnails", ["tests/test_aithumb.py"])]
+                ("AI-designed thumbnails", ["tests/test_aithumb.py"]),
+                ("downloads and posts carry the chosen cover", ["tests/test_coverclip.py"])]
         for name, args in runs:
             print(f"\n=== {name} ===", flush=True)
             r = subprocess.run([sys.executable, *args], cwd=ROOT, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")

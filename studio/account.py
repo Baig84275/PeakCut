@@ -86,7 +86,8 @@ def zip_clips(clip_ids: list, limit_gb: float = 4.0) -> Path:
         clip = next((c for c in (job or {}).get("clips", []) if c["id"] == cid and c.get("status") == "done"), None)
         if not clip or not clip.get("file"):
             continue
-        f = Path(job["dir"]) / "clips" / Path(str(clip["file"])).name
+        from . import coverclip
+        f = coverclip.path_for(job, clip)              # with its chosen thumbnail inside, when there is one
         if not f.is_file():
             continue
         total += f.stat().st_size
