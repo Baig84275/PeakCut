@@ -298,6 +298,15 @@ def _me(request: Request):
     return request.state.user
 
 
+def _image_status(u) -> dict:
+    """Whether this person may use the paid AI look on thumbnails, and roughly what one costs."""
+    from . import imagegen
+    if not imagegen.ready():
+        return {"on": False}
+    c = imagegen.current()
+    return {"on": bool(u.is_admin or c["everyone"]), "price": round(imagegen.price(), 3)}
+
+
 def _admin(request: Request):
     """The signed-in admin, read from the database for this very request. Anyone else gets "not found"."""
     u = getattr(request.state, "user", None)
@@ -574,7 +583,7 @@ def status(request: Request):
     from . import notices
     from . import updates
     me_ = _me(request)
-    return {"user": auth.public(me_), "update": updates.latest() if me_.is_admin else None, "accounts": config.ACCOUNTS, "disk_full": load.disk_full(), "no_ffmpeg": bool(_tools.missing()), "links": {"repo": config.REPO_URL, "follow": config.FOLLOW_URL}, "ai": usage.brief(), "unread": notices.unread(),
+    return {"user": auth.public(me_), "update": updates.latest() if me_.is_admin else None, "accounts": config.ACCOUNTS, "disk_full": load.disk_full(), "no_ffmpeg": bool(_tools.missing()), "links": {"repo": config.REPO_URL, "follow": config.FOLLOW_URL}, "ai": usage.brief(), "ai_image": _image_status(me_), "unread": notices.unread(),
             "tour": not accounts.settings()["tour_done"],
             "youtube": accounts.youtube_ready(), "connect": {p: accounts.can_connect(p) for p in accounts.PLATFORM_NAMES}, "max_upload_mb": config.MAX_UPLOAD_MB, "upload_part_mb": config.UPLOAD_PART_MB, "max_batch": config.MAX_ACTIVE_JOBS_PER_USER,
             "styles": {k: v["label"] for k, v in render.STYLES.items()}, "layouts": render.LAYOUTS}
@@ -683,6 +692,35 @@ def list_jobs():
 @app.get("/api/jobs/{jid}")
 def get_job(jid: str):
     return jobs.public(_job_or_404(jid))
+
+
+@app.get("/api/channel-videos")
+def channel_videos(request: Request, url: str = "", tab: str = "streams", page: int = 1):
+    """A channel's past live streams or videos, to tick the ones to clip."""
+    from . import channels
+    url = url.strip()[:500]
+    if not media.site_allowed(url if re.match(r"^https?://", url) else "https://" + url):
+        raise HTTPException(400, "Paste a full link to a YouTube or Twitch channel.")
+    _throttle(f"chlist:{_me(request).id}", 20, 60, "Too many channel lists at once. Wait a moment.")
+    try:
+        return _lookup(channels.list_videos, url, tab, page)
+    except media.YouTubeBlocked as e:
+        raise HTTPException(503, str(e))
+    except channels.NotAChannel as e:
+        raise HTTPException(422, str(e))
+
+
+@app.get("/api/channel-thumb/{platform}/{vid}")
+def channel_thumb(request: Request, platform: str, vid: str):
+    """The small picture of a listed video. Only the video sites' own picture servers are ever asked."""
+    from . import channels
+    if platform not in ("youtube", "twitch") or not re.fullmatch(r"[\w\-]{1,20}", vid):
+        raise HTTPException(404)
+    _throttle(f"chthumb:{_me(request).id}", 240, 60)
+    got = channels.thumb(platform, vid)
+    if not got:
+        raise HTTPException(404)
+    return Response(got[0], media_type=got[1], headers={"Cache-Control": "private, max-age=86400"})
 
 
 @app.get("/api/preview")
@@ -943,6 +981,99 @@ def rerender(jid: str, cid: str, body: dict = Body(...)):
     return jobs.public(job)
 
 
+def _clip_or_404(jid: str, cid: str):
+    job = _job_or_404(jid)
+    clip = next((c for c in job["clips"] if c["id"] == cid), None) if re.fullmatch(r"[\w\-]{1,40}", cid) else None
+    if not clip:
+        raise HTTPException(404, "No such clip")
+    return job, clip
+
+
+@app.post("/api/jobs/{jid}/clips/{cid}/thumbs")
+def make_thumbs(jid: str, cid: str):
+    """Make three thumbnails (9:16 and 16:9) for one finished clip."""
+    from . import thumbs
+    job, clip = _clip_or_404(jid, cid)
+    if clip.get("status") in ("queued", "rendering"):
+        raise HTTPException(409, "This clip is still being made. Make thumbnails once it is ready.")
+    _quota()
+    _throttle("thumb:" + ctx.uid(), 30, 600, "That's a lot of thumbnails in a short time. Wait a few minutes.")
+    try:
+        thumbs.request(job, clip)
+    except thumbs.Busy as e:
+        raise HTTPException(409, str(e))
+    return jobs.public(job)
+
+
+@app.post("/api/jobs/{jid}/clips/{cid}/thumbs/choose")
+def choose_thumb(jid: str, cid: str, body: dict = Body(...)):
+    """Use one thumbnail as the clip's cover (n = 1, 2 or 3), or go back to the plain frame (n = null)."""
+    from . import thumbs
+    job, clip = _clip_or_404(jid, cid)
+    _throttle("thumbpick:" + ctx.uid(), 120, 600)
+    n = body.get("n")
+    if n is not None and not isinstance(n, int):
+        raise HTTPException(400, "Choose thumbnail 1, 2 or 3.")
+    try:
+        thumbs.choose(job, clip, n)
+    except thumbs.Busy as e:
+        raise HTTPException(409, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return jobs.public(job)
+
+
+@app.post("/api/jobs/{jid}/clips/{cid}/thumbs/{n}/look")
+def thumb_look(request: Request, jid: str, cid: str, n: int, body: dict = Body(...)):
+    """The paid AI look for one thumbnail, in one shape (fmt "v" for 9:16 or "h" for 16:9)."""
+    from . import imagegen, thumbs
+    job, clip = _clip_or_404(jid, cid)
+    _throttle("thumblook:" + ctx.uid(), 10, 600, "That's a lot of AI pictures in a short time. Wait a few minutes.")
+    _quota()
+    u = _me(request)
+    try:
+        thumbs.request_look(job, clip, n, str(body.get("fmt") or "v"), bool(u and u.is_admin and not u.disabled))
+    except imagegen.NotAllowed as e:
+        raise HTTPException(403, str(e))
+    except thumbs.Busy as e:
+        raise HTTPException(409, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return jobs.public(job)
+
+
+@app.delete("/api/jobs/{jid}/clips/{cid}/thumbs/{n}/look")
+def thumb_unlook(jid: str, cid: str, n: int, fmt: str = "v"):
+    """Back to the plain picture for one thumbnail in one shape."""
+    from . import thumbs
+    job, clip = _clip_or_404(jid, cid)
+    try:
+        thumbs.drop_look(job, clip, n, fmt)
+    except thumbs.Busy as e:
+        raise HTTPException(409, str(e))
+    return jobs.public(job)
+
+
+@app.put("/api/jobs/{jid}/clips/{cid}/thumbs/{n}")
+def edit_thumb(jid: str, cid: str, n: int, body: dict = Body(...)):
+    """New words or a new colour on one thumbnail. Drawn again from its clean picture: no AI, no video."""
+    from . import thumbs
+    job, clip = _clip_or_404(jid, cid)
+    _throttle("thumbedit:" + ctx.uid(), 60, 600, "That's a lot of changes in a short time. Wait a few minutes.")
+    words, accent = body.get("words"), body.get("accent")
+    if words is not None and (not isinstance(words, str) or len(words) > 80):
+        raise HTTPException(400, "Keep the words short: two to four words.")
+    if accent is not None and not isinstance(accent, str):
+        raise HTTPException(400, "That colour isn't one of the choices.")
+    try:
+        thumbs.edit(job, clip, n, words, accent)
+    except thumbs.Busy as e:
+        raise HTTPException(409, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return jobs.public(job)
+
+
 @app.delete("/api/jobs/{jid}")
 def delete_job(jid: str):
     job = _job_or_404(jid)
@@ -978,6 +1109,27 @@ def bulk_delete(body: dict = Body(...)):
     vids = [x for x in (body.get("videos") if isinstance(body.get("videos"), list) else [])[:300]
             if isinstance(x, str) and re.fullmatch(r"[\w\-]{8,60}", x)]
     return account.delete_many(vids, _pairs(body.get("clips")))
+
+
+@app.post("/api/thumbs/bulk")
+def bulk_thumbs(body: dict = Body(...)):
+    """Thumbnails for many clips at once. Clips that can't be done right now are skipped and counted."""
+    from . import thumbs
+    _throttle("thumbbulk:" + ctx.uid(), 6, 600, "Give it a moment: thumbnails for many clips were just started.")
+    pairs = _pairs(body.get("clips"), limit=50)
+    _quota()
+    queued, skipped = 0, []
+    for jid, cid in pairs:
+        job = jobs.get(jid)
+        clip = next((c for c in (job or {}).get("clips", []) if c["id"] == cid), None)
+        if not clip:
+            continue
+        try:
+            thumbs.request(job, clip)
+            queued += 1
+        except thumbs.Busy as e:
+            skipped.append({"clip": cid, "why": str(e)})
+    return {"queued": queued, "skipped": skipped}
 
 
 @app.get("/api/clips.zip")
@@ -1246,7 +1398,40 @@ def clip_now(jid: str, body: dict = Body(...)):
 # ================================================================ AI usage
 @app.get("/api/usage")
 def ai_usage():
-    return usage.summary({c["id"]: c["name"] for c in creators.all_creators()})
+    from . import imagegen
+    return {**usage.summary({c["id"]: c["name"] for c in creators.all_creators()}), "images": imagegen.summary()}
+
+
+@app.get("/api/ai/image")
+def ai_image_get(request: Request):
+    from . import imagegen
+    _admin(request)
+    return imagegen.public()
+
+
+@app.put("/api/ai/image")
+def ai_image_put(request: Request, body: dict = Body(...)):
+    """The optional AI pictures for thumbnails: switched on or off, model, quality, key and daily limit."""
+    from . import imagegen
+    _admin(request)
+    try:
+        out = imagegen.save(body)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    ctx.bump()
+    return out
+
+
+@app.post("/api/ai/image/test")
+def ai_image_test(request: Request):
+    """Checks the key and model without making a picture, so it costs nothing."""
+    from . import imagegen
+    _admin(request)
+    _throttle("aiimgtest:" + ctx.uid(), 20, 600)
+    try:
+        return imagegen.test()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, str(e)[:300])
 
 
 # ---------------------------------------------------------------- the AI key and model, set from the dashboard
@@ -1369,11 +1554,26 @@ def connect_callback(platform: str, code: str = "", state: str = "", error: str 
     return _back(connected=platform, name=acc["name"])
 
 
+@app.get("/pub/{token}.jpg")
+def public_cover(token: str):
+    """A clip's thumbnail for a platform to fetch while posting it: one picture, one hour, signed."""
+    got = accounts.read_clip_link(token)
+    if not got or not got[2].endswith(".jpg"):
+        raise HTTPException(404)
+    uid, job_id, name = got
+    with ctx.as_user(uid):
+        job = jobs.get(job_id) if re.fullmatch(r"[\w\-]{8,60}", job_id) else None
+        f = Path(job["dir"]) / "clips" / name if job else None
+    if not f or not f.is_file():
+        raise HTTPException(404)
+    return FileResponse(f, media_type="image/jpeg", headers={"Cache-Control": "private, no-store"})
+
+
 @app.get("/pub/{token}.mp4")
 def public_clip(token: str):
     """A clip for a platform to fetch while posting it: one clip, one hour, signed (see accounts.clip_link)."""
     got = accounts.read_clip_link(token)
-    if not got:
+    if not got or not got[2].endswith(".mp4"):
         raise HTTPException(404)
     uid, job_id, name = got
     with ctx.as_user(uid):

@@ -48,7 +48,7 @@ def _mirror(p):
     job = jobs.get(p["job"])
     clip = next((c for c in job["clips"] if c["id"] == p["clip"]), None) if job else None
     if clip is not None:
-        clip.setdefault("posts", {})[p["id"]] = {k: p.get(k) for k in ("account_name", "platform", "status", "url", "due_at", "error")}
+        clip.setdefault("posts", {})[p["id"]] = {k: p.get(k) for k in ("account_name", "platform", "status", "url", "due_at", "error", "note")}
         jobs.save(job)
 
 
@@ -105,10 +105,29 @@ def _caption(clip, creator):
     return "\n\n".join(x for x in (clip.get("description", ""), tags, creator.get("post_footer", "")) if x)
 
 
+def cover_for(job, clip):
+    """The thumbnail to post with a clip: the chosen one, else the first. (9:16 picture or None, its moment in
+    the clip in milliseconds or None). Nothing when the clip has no thumbnails."""
+    st = clip.get("thumbs") or {}
+    if st.get("status") != "done" or not st.get("variants"):
+        return None, None
+    v = st["variants"][(st.get("chosen") or 1) - 1]
+    pic = Path(job["dir"]) / "clips" / Path(str(v["files"].get("v", ""))).name
+    ms = int(max(0.0, min(float(clip["end"]) - float(clip["start"]) - 0.1, float(v.get("t", clip["start"])) - float(clip["start"]))) * 1000)
+    return (pic if pic.is_file() else None), ms
+
+
+THUMB_WAIT = 120          # a post waits this long (a few times at most) for thumbnails still being made
+
+
 def _post(p):
     job = jobs.get(p["job"])
     clip = next((c for c in job["clips"] if c["id"] == p["clip"]), None) if job else None
     acc = accounts.get(p["account"])
+    if clip and (clip.get("thumbs") or {}).get("status") in ("queued", "making") and p.get("thumb_waits", 0) < 5:
+        p.update(status="scheduled", due_at=time.time() + THUMB_WAIT, thumb_waits=p.get("thumb_waits", 0) + 1)   # post it with its thumbnail
+        _save()
+        return
     try:
         if not clip or clip.get("status") != "done":
             raise RuntimeError("The clip no longer exists or is not finished.")
@@ -117,15 +136,22 @@ def _post(p):
         path = Path(job["dir"]) / "clips" / clip["file"]
         creator = creators.get(job["creator"]) or dict(creators.DEFAULTS, name="clips")
         title, cap = clip.get("title") or clip.get("hook") or "Clip", _caption(clip, creator)
+        cover, cover_ms = cover_for(job, clip)
+        note = ""
         if acc["platform"] == "youtube":
             rid, url = accounts.youtube_upload(acc, path, title, cap + "\n\n#Shorts", clip.get("hashtags", []), creator["privacy"])
+            if cover:
+                try:
+                    accounts.youtube_thumbnail(acc, rid, cover)
+                except Exception as e:  # noqa: BLE001 - the video is up; a missing thumbnail is only a note
+                    note = str(e)[:300]
         elif acc["platform"] == "instagram":
-            rid, url = accounts.instagram_upload(acc, path, f"{title}\n\n{cap}", job["id"])
+            rid, url = accounts.instagram_upload(acc, path, f"{title}\n\n{cap}", job["id"], cover, cover_ms)
         elif acc["platform"] == "tiktok":
-            rid, url = accounts.tiktok_upload(acc, path, f"{title}\n\n{cap}", creator["privacy"])
+            rid, url = accounts.tiktok_upload(acc, path, f"{title}\n\n{cap}", creator["privacy"], cover_ms)
         else:
             raise RuntimeError("That kind of account is no longer supported.")
-        p.update(status="posted", posted_at=time.time(), remote_id=rid, url=url, error=None)
+        p.update(status="posted", posted_at=time.time(), remote_id=rid, url=url, error=None, note=note)
         creators.log(p["creator"], f"Posted to {acc['name']}: {title}")
     except Exception as e:  # noqa: BLE001
         p["tries"] += 1

@@ -301,21 +301,35 @@ def call(model: str, prompt: str, schema: dict, timeout: float | None = None):
     return {"gemini": _gemini, "openai": _openai, "anthropic": _anthropic}[how](model, prompt, schema, timeout)
 
 
-def see(prompt: str, image: bytes, timeout: float | None = None) -> tuple[str, int, int]:
+def see(prompt: str, image: bytes, timeout: float | None = None, schema: dict | None = None,
+        model: str | None = None) -> tuple:
     """Ask one model about one picture: (the answer as text, tokens in, tokens out).
 
     Nothing is broken by a service that cannot look at pictures, or a model that is only text: the answer
     comes back empty, or says something the caller does not understand, and the caller carries on without
-    it. The picture is a JPEG, passed as base64 inside the ordinary message."""
+    it. The picture is a JPEG, passed as base64 inside the ordinary message.
+
+    With a `schema`, the answer is JSON in that shape and comes back already parsed (a list or a dict)."""
     if not ready() or not image or not models():
-        return "", 0, 0
-    model = models()[0]
-    b64 = base64.b64encode(image).decode()
+        return ("" if schema is None else None), 0, 0
+    model = model or models()[0]
     how = PROVIDERS[provider()][2]
+    if schema is not None and how != "gemini":
+        prompt = _wrapped(prompt, schema)
+    text, sent, wrote = _see(model, how, prompt, image, timeout, schema)
+    if schema is None:
+        return text, sent, wrote
+    return _parse(text), sent, wrote
+
+
+def _see(model, how, prompt, image, timeout, schema):
+    b64 = base64.b64encode(image).decode()
     if how == "gemini":
         body = {"contents": [{"role": "user", "parts": [
             {"text": prompt},
             {"inline_data": {"mimeType": "image/jpeg", "data": b64}}]}]}
+        if schema is not None:
+            body["generationConfig"] = {"temperature": 0.7, "responseMimeType": "application/json", "responseSchema": schema}
         r = httpx.post(f"{base_url()}/{model}:generateContent", json=body,
                        headers={"x-goog-api-key": key()}, timeout=timeout or 120)
         if r.status_code != 200:
@@ -326,7 +340,7 @@ def see(prompt: str, image: bytes, timeout: float | None = None) -> tuple[str, i
         sent = int(u.get("promptTokenCount") or 0)
         return text, sent, max(0, int(u.get("totalTokenCount") or 0) - sent)
     if how == "anthropic":
-        body = {"model": model, "max_tokens": 300, "messages": [{"role": "user", "content": [
+        body = {"model": model, "max_tokens": 300 if schema is None else 1200, "messages": [{"role": "user", "content": [
             {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}},
             {"type": "text", "text": prompt}]}]}
         r = httpx.post(f"{base_url()}/messages", json=body, timeout=timeout or 120,

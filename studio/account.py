@@ -38,6 +38,8 @@ def delete_clip(jid: str, cid: str) -> bool:
     for stem in {cid, Path(str(clip.get("file") or cid)).stem}:     # the captions and the notes kept beside the clip
         for ext in ("ass", "json"):
             (d / "clips" / f"{stem}.{ext}").unlink(missing_ok=True)
+    from . import thumbs
+    thumbs.remove_files(job, cid)                  # its thumbnails, every version
     src = clip.get("src")
     if src:                                        # the piece of video fetched or recorded just for this clip
         p = Path(src)
@@ -96,6 +98,14 @@ def zip_clips(clip_ids: list, limit_gb: float = 4.0) -> Path:
             name, n = f"{base} ({n}).mp4", n + 1
         seen.add(name.lower())
         files.append((f, name))
+        st = clip.get("thumbs") or {}
+        if st.get("status") == "done" and st.get("variants"):     # its thumbnails too: the chosen one, else the first
+            v = st["variants"][(st.get("chosen") or 1) - 1]
+            for fmt, label in (("v", "cover 9x16"), ("h", "thumbnail 16x9")):
+                t = Path(job["dir"]) / "clips" / Path(str(v["files"].get(fmt, ""))).name
+                if t.is_file():
+                    total += t.stat().st_size
+                    files.append((t, f"{name[:-4]} {label}.jpg"))
     if not files:
         raise ValueError("None of those clips are ready to download.")
     tmp = config.user_dir(ctx.uid()) / "tmp"

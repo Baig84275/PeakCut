@@ -604,6 +604,31 @@ dialog::backdrop{background:rgba(14,12,11,.42);animation:fadein .16s ease}
 .editor .panel{padding:22px;overflow:auto;display:flex;flex-direction:column;gap:14px}
 .editor h3{font-size:13px;font-weight:600;color:var(--dim);margin-top:6px}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.tgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.tgrid.h{grid-template-columns:1fr}
+.tile{display:flex;flex-direction:column;gap:6px;padding:6px;border-radius:var(--r-sm);background:var(--muted);border:2px solid transparent;min-width:0}
+.tile.on{border-color:var(--brand)}
+.tile img{width:100%;border-radius:6px;display:block;background:#000;cursor:zoom-in}
+.tile input,.tile select{height:32px;font-size:13px}
+.tile .row{gap:4px;flex-wrap:nowrap}
+.tseg{display:inline-flex;background:var(--muted);border-radius:999px;padding:3px}
+.tseg button{border:0;background:transparent;border-radius:999px;height:28px;padding:0 12px;font-size:12px;font-weight:600;color:var(--dim);cursor:pointer;transition:background-color .15s ease,color .15s ease}
+.tseg button:hover{color:var(--text)}
+.tseg button.on{background:#fff;color:var(--text)}
+#chdlg{width:720px}
+.chd{display:flex;flex-direction:column;gap:12px;padding:20px;max-height:min(86vh,900px)}
+.chlist{display:flex;flex-direction:column;gap:6px;overflow:auto;min-height:120px;flex:1}
+.chrow{display:grid;grid-template-columns:22px 128px 1fr;gap:12px;align-items:center;padding:8px;border-radius:var(--r-sm);background:var(--muted);cursor:pointer;transition:background-color .15s ease}
+.chrow:hover{background:#EFE8E2}
+.chrow.on{background:var(--brand-soft)}
+.chrow.off{opacity:.55;cursor:default}
+.chrow .pic{position:relative;width:128px;aspect-ratio:16/9;border-radius:6px;overflow:hidden;background:#000}
+.chrow .pic img{width:100%;height:100%;object-fit:cover;display:block}
+.chrow .pic span{position:absolute;right:4px;bottom:4px;background:rgba(0,0,0,.75);color:#fff;font-size:11px;font-weight:600;padding:1px 5px;border-radius:4px}
+.chrow b{display:block;font-size:14px;line-height:1.3;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.chrow small{color:var(--dim);font-size:12px}
+.chrow em{color:var(--bad);font-style:normal;font-size:12px}
+@media (max-width:600px){.chrow{grid-template-columns:22px 96px 1fr}.chrow .pic{width:96px}}
+.badge.tm{left:8px;right:auto;top:auto;bottom:8px;background:var(--brand-soft);color:var(--brand-deep)}
 #toasts{position:fixed;right:20px;bottom:20px;display:flex;flex-direction:column;gap:8px;z-index:50}
 .toast{background:var(--frame);color:var(--frame-text);border:1px solid var(--frame-2);border-radius:var(--r);padding:12px 16px;max-width:380px;animation:rise .2s ease;display:flex;gap:10px;align-items:center;font-weight:500}
 .toast::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--brand);flex:none}
@@ -833,6 +858,7 @@ dialog[open]{animation:fadein .16s ease}
 </div>
 <dialog id="clipdlg"></dialog>
 <dialog id="formdlg"></dialog>
+<dialog id="chdlg"></dialog>
 <input type="file" id="file" accept="video/*" multiple hidden>
 <div id="toasts" role="status" aria-live="polite"></div>
 <div class="pop" id="bellpop" role="dialog" aria-label="Notifications" hidden></div>
@@ -847,6 +873,7 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt
 const I = {
  "github": "<path fill-rule=\"evenodd\" transform=\"scale(16)\" d=\"M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z\"/>",
  "instagram": "<rect x=\"32\" y=\"32\" width=\"192\" height=\"192\" rx=\"56\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"18\"/><circle cx=\"128\" cy=\"128\" r=\"42\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"18\"/><circle cx=\"184\" cy=\"72\" r=\"13\"/>",
+ "image": "<path d=\"M216,40H40A16,16,0,0,0,24,56V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A16,16,0,0,0,216,40Zm0,16V158.75l-26.07-26.06a16,16,0,0,0-22.63,0l-20,20-44-44a16,16,0,0,0-22.62,0L40,149.37V56ZM40,172l52-52,80,80H40Zm176,28H194.63l-36-36,20-20L216,181.38V200ZM144,100a12,12,0,1,1,12,12A12,12,0,0,1,144,100Z\"/>",
  "chat": "<path d=\"M128,24A104,104,0,0,0,36.18,176.88L24.83,210.93a16,16,0,0,0,20.24,20.24l34.05-11.35A104,104,0,1,0,128,24Zm0,192a87.87,87.87,0,0,1-44.06-11.81,8,8,0,0,0-6.54-.67L40,216,52.47,178.6a8,8,0,0,0-.66-6.54A88,88,0,1,1,128,216Zm12-88a12,12,0,1,1-12-12A12,12,0,0,1,140,128Zm-44,0a12,12,0,1,1-12-12A12,12,0,0,1,96,128Zm88,0a12,12,0,1,1-12-12A12,12,0,0,1,184,128Z\"/>",
  "bug": "<path d=\"M144,92a12,12,0,1,1,12,12A12,12,0,0,1,144,92ZM100,80a12,12,0,1,0,12,12A12,12,0,0,0,100,80Zm116,64A87.76,87.76,0,0,1,213,167l22.24,9.72A8,8,0,0,1,232,192a7.89,7.89,0,0,1-3.2-.67L207.38,182a88,88,0,0,1-158.76,0L27.2,191.33A7.89,7.89,0,0,1,24,192a8,8,0,0,1-3.2-15.33L43,167A87.76,87.76,0,0,1,40,144v-8H16a8,8,0,0,1,0-16H40v-8a87.76,87.76,0,0,1,3-23L20.8,79.33a8,8,0,1,1,6.4-14.66L48.62,74a88,88,0,0,1,158.76,0l21.42-9.36a8,8,0,0,1,6.4,14.66L213,89.05a87.76,87.76,0,0,1,3,23v8h24a8,8,0,0,1,0,16H216ZM56,120H200v-8a72,72,0,0,0-144,0Zm64,95.54V136H56v8A72.08,72.08,0,0,0,120,215.54ZM200,144v-8H136v79.54A72.08,72.08,0,0,0,200,144Z\"/>",
  "bulb": "<path d=\"M176,232a8,8,0,0,1-8,8H88a8,8,0,0,1,0-16h80A8,8,0,0,1,176,232Zm40-128a87.55,87.55,0,0,1-33.64,69.21A16.24,16.24,0,0,0,176,186v6a16,16,0,0,1-16,16H96a16,16,0,0,1-16-16v-6a16,16,0,0,0-6.23-12.66A87.59,87.59,0,0,1,40,104.49C39.74,56.83,78.26,17.14,125.88,16A88,88,0,0,1,216,104Zm-16,0a72,72,0,0,0-73.74-72c-39,.92-70.47,33.39-70.26,72.39a71.65,71.65,0,0,0,27.64,56.3A32,32,0,0,1,96,186v6h64v-6a32.15,32.15,0,0,1,12.47-25.35A71.65,71.65,0,0,0,200,104Z\"/>",
@@ -1383,6 +1410,7 @@ function drawAdd(variant) {
       <div class="ob"><div class="ot">Video quality</div><input type="hidden" id="o_quality" value="720"><div class="seg" role="group" aria-label="Video quality">
         <button type="button" data-seg="o_quality" data-v="720" aria-pressed="true">720p<small>Fast</small></button>
         <button type="button" data-seg="o_quality" data-v="1080" aria-pressed="false">1080p<small>Sharper, about 2x slower</small></button></div></div>
+      <div class="ob"><div class="ot">Thumbnails</div><label class="ck"><input type="checkbox" id="o_thumbs" ${c?.auto_thumbs ? "checked" : ""}>Make thumbnails for every clip</label></div>
       <div class="ob"><div class="ot">Part of the video</div><div class="range">
         <label>From<input id="o_from" type="number" min="0" placeholder="start" aria-label="From minute">min</label>${ic("arrowr")}
         <label>To<input id="o_to" type="number" min="0" placeholder="end" aria-label="Up to minute">min</label></div></div>
@@ -1445,7 +1473,7 @@ document.addEventListener("keydown", e => {
 const targetCreator = () => creatorId() || $("#o_creator")?.value || "";
 function jobOptions() {
   const n = id => { const v = $(id).value; return v === "" ? null : Number(v); };
-  const o = {max_clips:n("#o_max"), min_len:n("#o_min"), max_len:n("#o_maxlen"), captions:$("#o_captions").checked, style:$("#o_style").value, layout:$("#o_layout").value, quality:n("#o_quality")};
+  const o = {max_clips:n("#o_max"), min_len:n("#o_min"), max_len:n("#o_maxlen"), captions:$("#o_captions").checked, style:$("#o_style").value, layout:$("#o_layout").value, quality:n("#o_quality"), thumbs:!!$("#o_thumbs")?.checked};
   if (n("#o_from") !== null) o.range_start = n("#o_from") * 60;
   if (n("#o_to") !== null) o.range_end = n("#o_to") * 60;
   return o;
@@ -1459,7 +1487,7 @@ const att = () => DRAFTS[draftKey()] ||= {files: [], links: [], note: null, busy
 const VIDEO_EXT = /\.(mp4|mov|mkv|webm|m4v|ts|flv)$/i;
 const fmtLen = s => { s = Math.round(s || 0); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = String(s % 60).padStart(2, "0"); return h ? `${h}:${String(m).padStart(2, "0")}:${x}` : `${m}:${x}`; };
 const fmtSize = b => b >= 1e9 ? (b / 1e9).toFixed(1) + " GB" : Math.max(1, Math.round(b / 1e6)) + " MB";
-const isChannel = u => /^(https?:\/\/)?(www\.)?(twitch\.tv|kick\.com)\/[A-Za-z0-9_]+\/?$/.test(u) || /youtube\.com\/(@[^/]+|channel\/[^/]+)\/?(live|videos|streams)?\/?$/.test(u);
+const isChannel = u => /^(https?:\/\/)?(www\.|m\.)?(twitch\.tv|kick\.com)\/[A-Za-z0-9_-]+\/?(videos\/?)?([?#].*)?$/i.test(u) || /youtube\.com\/(@[^/?#]+|channel\/[^/?#]+|c\/[^/?#]+|user\/[^/?#]+)\/?(live|videos|streams|featured|shorts)?\/?([?#].*)?$/i.test(u);
 const looksLink = u => /^https?:\/\/([\w-]+\.)*(youtube\.com|youtu\.be|twitch\.tv|kick\.com)\//i.test(u);
 const fullLink = u => /[?&]v=[\w-]{11}\b|youtu\.be\/[\w-]{11}\b|\/(shorts|live|embed)\/[\w-]{11}\b|twitch\.tv\/videos\/\d{6,}|clips\.twitch\.tv\/\w|twitch\.tv\/\w+\/clip\/\w|kick\.com\/[\w-]+\/(videos?|clips?)\/[\w-]{6,}/i.test(u);
 const batchMax = () => S.status.max_batch || 5;
@@ -1554,7 +1582,10 @@ function onLink(input) {
   clearTimeout(linkTimer);
   const A = att(), u = input.value.trim();
   if (!u) { A.note = null; return drawAtt(); }
-  if (isChannel(u)) { A.note = "That's a channel, not a video. To clip their live streams, add them as a creator and press Start recording."; return drawAtt(); }
+  if (isChannel(u)) {
+    if (/kick\.com/i.test(u)) { A.note = "That's a Kick channel. Paste the link of one of their videos, or add them as a creator to record their live streams."; return drawAtt(); }
+    A.note = null; input.value = ""; drawAtt(); return openChannel(u);
+  }
   if (!looksLink(u)) { A.note = u.length > 10 ? "Paste a full YouTube, Twitch or Kick video link." : null; return drawAtt(); }
   A.note = null; drawAtt();
   if (fullLink(u)) return takeLink(A, u, input);
@@ -1668,13 +1699,108 @@ async function makeClips() {
   } else if (failed) toast("Nothing was started. The reason is shown on the video.", "bad");
 }
 
+/* ============================================================ AI pictures for thumbnails (settings) */
+async function drawAiImage() {
+  const box = $("#aiimg"); if (!box) return;
+  let g; try { g = S.aiimg = await api("/api/ai/image"); } catch { box.remove(); return; }
+  const own = !(g.use_chat_key && g.chat_is_openai);
+  box.innerHTML = `<h2>AI look for thumbnails</h2>
+    <p class="help">Optional and paid. An OpenAI image model repaints a thumbnail with punchier light and colour; PeakCut adds the words itself. Each picture costs money on your OpenAI account, so it is off until you switch it on, and only made when you press <b>AI look</b> on a thumbnail.</p>
+    <div class="ai-state">${g.ready ? `<span class="pill ok">${ic("check")}On</span><span class="sub">${esc(g.model)} · ${esc(g.quality)} · about $${g.price.toFixed(3)} a picture · $${g.spent_today.toFixed(2)} spent today</span>` : `<span class="pill warn">Off</span><span class="sub">Normal thumbnails don't need this.</span>`}</div>
+    <div class="ai-form">
+      <label class="f">AI pictures<select id="ig_provider"><option value="off" ${g.provider === "off" ? "selected" : ""}>Off</option><option value="openai" ${g.provider === "openai" ? "selected" : ""}>OpenAI</option></select></label>
+      <label class="f">Model<input id="ig_model" value="${esc(g.model)}" list="ig_models" spellcheck="false"><datalist id="ig_models"><option value="gpt-image-2"><option value="gpt-image-1.5"><option value="gpt-image-1-mini"></datalist>
+        <span class="hint">gpt-image-2 is a good choice.</span></label>
+      <label class="f">Quality<select id="ig_quality">${g.qualities.map(q => `<option value="${q}" ${q === g.quality ? "selected" : ""}>${q[0].toUpperCase() + q.slice(1)} · about $${g.prices[q].toFixed(3)} a picture</option>`).join("")}</select></label>
+      ${g.chat_is_openai ? `<label class="ck"><input type="checkbox" id="ig_usechat" ${g.use_chat_key ? "checked" : ""}>Use the OpenAI key from above</label>` : ""}
+      <label class="f" id="ig_keywrap" ${own ? "" : "hidden"}>OpenAI key for pictures<input id="ig_key" type="password" autocomplete="off" spellcheck="false" placeholder="${g.has_key ? "Saved, ending " + esc(g.key_hint) + ". Leave empty to keep it." : "sk-..."}"></label>
+      <label class="f">Daily limit (US dollars)<input id="ig_daily" type="number" min="0" step="0.5" value="${g.daily_usd}"><span class="hint">No more AI pictures once today's spend reaches this. 0 means no limit.</span></label>
+      ${S.status.accounts ? `<label class="ck"><input type="checkbox" id="ig_everyone" ${g.everyone ? "checked" : ""}>Let everyone on this server use it (on your key)</label>` : ""}
+    </div>
+    <div class="row" style="margin-top:20px"><button class="btn primary" data-act="igsave">Save and check key</button></div>`;
+}
+document.addEventListener("change", e => { if (e.target.id === "ig_usechat") $("#ig_keywrap").hidden = e.target.checked; });
+
+/* ============================================================ pick videos from a channel */
+const CH = {url: "", tab: "streams", pages: [], picked: new Map(), busy: false, err: "", name: ""};
+const chAgo = t => { if (!t) return ""; const d = Math.max(0, Date.now() / 1000 - t); return d < 86400 ? "today" : d < 172800 ? "yesterday" : d < 30 * 86400 ? Math.round(d / 86400) + " days ago" : d < 365 * 86400 ? Math.round(d / (30 * 86400)) + " months ago" : Math.round(d / (365 * 86400)) + " years ago"; };
+const chViews = n => !n ? "" : n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M views" : n >= 1e3 ? Math.round(n / 1e3) + "K views" : n + " views";
+function clippedUrls() {
+  const ids = new Set();
+  for (const j of S.jobs) { const u = j.source?.url || ""; const m = u.match(/[?&]v=([\w-]{11})|youtu\.be\/([\w-]{11})|\/live\/([\w-]{11})|twitch\.tv\/videos\/(\d+)/); if (m) ids.add(m[1] || m[2] || m[3] || m[4]); }
+  return ids;
+}
+async function openChannel(u) {
+  Object.assign(CH, {url: u, tab: /\/videos\/?(\?|$)/.test(u) && !/twitch/i.test(u) ? "videos" : "streams", pages: [], picked: new Map(), err: "", name: ""});
+  const A = att(); CH.thumbs = !!$("#o_thumbs")?.checked;
+  drawChannel(); $("#chdlg").showModal(); await loadChannel();
+}
+async function loadChannel(more) {
+  if (CH.busy) return;
+  CH.busy = true; CH.err = ""; drawChannel();
+  try {
+    const page = more ? CH.pages.length + 1 : 1;
+    const r = await api(`/api/channel-videos?url=${encodeURIComponent(CH.url)}&tab=${CH.tab}&page=${page}`);
+    if (!more) CH.pages = [];
+    CH.pages.push(r); CH.name = r.channel; CH.platform = r.platform;
+  } catch (e) { CH.err = e.message; }
+  CH.busy = false; drawChannel();
+}
+function drawChannel() {
+  const dlg = $("#chdlg"), A = att(), room = Math.max(0, batchMax() - batchUsed(A)), done = clippedUrls();
+  const items = CH.pages.flatMap(p => p.items), last = CH.pages[CH.pages.length - 1];
+  const rows = items.map(it => {
+    const why = it.reason || (done.has(it.id) ? "Already clipped." : ""), on = CH.picked.has(it.url);
+    const meta = [it.duration ? fmtLen(it.duration) : "", chViews(it.views), chAgo(it.date)].filter(Boolean).join(" · ");
+    return `<label class="chrow ${on ? "on" : ""} ${it.reason ? "off" : ""}">
+      <input type="checkbox" data-chpick="${esc(it.url)}" ${on ? "checked" : ""} ${it.reason ? "disabled" : ""} aria-label="${esc(it.title)}">
+      <span class="pic"><img src="${esc(it.thumb)}" alt="" loading="lazy">${it.duration ? `<span>${fmtLen(it.duration)}</span>` : ""}</span>
+      <span><b title="${esc(it.title)}">${esc(it.title)}</b><small>${esc(meta)}</small>${why ? `<br><em>${esc(why)}</em>` : ""}</span></label>`;
+  }).join("");
+  const n = CH.picked.size;
+  dlg.innerHTML = `<div class="chd">
+    <div class="job-head" style="margin:0"><div><h2 style="margin:0;font-size:18px">${CH.name ? esc(CH.name) : "Channel"}</h2>
+      <p class="sub" style="margin:4px 0 0">Tick the videos to clip. They're added to your list next to Make clips.</p></div>
+      <button class="btn icon ghost" data-act="cpclose" aria-label="Close">${ic("x")}</button></div>
+    <div class="tseg"><button class="${CH.tab === "streams" ? "on" : ""}" data-act="cptab" data-tab="streams">Past live streams</button><button class="${CH.tab === "videos" ? "on" : ""}" data-act="cptab" data-tab="videos">Videos</button></div>
+    <div class="chlist">${CH.err ? `<p class="err">${esc(CH.err)}</p>` : ""}${rows}
+      ${CH.busy ? `<div class="lp wait"><div class="th"></div><div class="tx"><span class="sk" style="width:62%"></span><span class="sk" style="width:34%"></span></div></div>` : ""}
+      ${!CH.busy && !CH.err && last && !items.length ? `<p class="help">${CH.tab === "streams" ? "No past live streams found. Try Videos." : "No videos found."}</p>` : ""}
+      ${!CH.busy && last?.more ? `<button class="btn" data-act="cpmore">Load more</button>` : ""}</div>
+    <label class="ck"><input type="checkbox" data-chthumbs ${CH.thumbs ? "checked" : ""}>Make thumbnails for every clip</label>
+    <div class="row" style="justify-content:space-between;border-top:1px solid var(--line);padding-top:12px">
+      <span class="help" style="margin:0">${n} ticked · room for ${room} more${room < batchMax() ? " (some are already in your list)" : ""}</span>
+      <button class="btn primary" data-act="cpadd" ${n ? "" : "disabled"}>${ic("plus")}Add ${n || ""} to my list</button></div></div>`;
+}
+document.addEventListener("change", e => {
+  const c = e.target.closest?.("[data-chpick]");
+  if (c) {
+    const A = att(), room = Math.max(0, batchMax() - batchUsed(A)), it = CH.pages.flatMap(p => p.items).find(x => x.url === c.dataset.chpick);
+    if (c.checked && CH.picked.size >= room) { c.checked = false; toast(`You can send up to ${batchMax()} videos at a time. Clip these, then pick more.`, "bad"); return; }
+    if (c.checked && it) CH.picked.set(it.url, it); else CH.picked.delete(c.dataset.chpick);
+    return drawChannel();
+  }
+  if (e.target.matches?.("[data-chthumbs]")) CH.thumbs = e.target.checked;
+});
+function addPicked() {
+  const A = att();
+  for (const it of CH.picked.values()) {
+    if (A.links.some(l => l.url === it.url && l.state !== "bad") || batchUsed(A) >= batchMax()) continue;
+    A.links.push({id: newId(), url: it.url, state: "ok", info: {title: it.title, uploader: CH.name, duration: it.duration, thumb: it.thumb, is_live: false}});
+  }
+  if ($("#o_thumbs")) $("#o_thumbs").checked = CH.thumbs;
+  A.note = null; $("#chdlg").close(); drawAtt();
+  toast("Added. Press Make clips when you're ready.", "ok");
+}
+$("#chdlg").addEventListener("click", e => { if (e.target === e.currentTarget) e.currentTarget.close(); });
+
 /* ============================================================ clips + jobs */
 function scoreCls(s) { return s >= 80 ? "s-hi" : s >= 60 ? "s-mid" : ""; }
 function postPills(c) {
   return Object.values(c.posts || {}).filter(p => p.status !== "cancelled").map(p => {
     const cls = p.status === "posted" ? "ok" : p.status === "failed" ? "bad" : "warn";
     const txt = `${esc(p.account_name)} · ${p.status === "scheduled" ? clock(p.due_at) : p.status}`;
-    return p.url ? `<a class="pill ${cls}" href="${esc(p.url)}" target="_blank" rel="noopener">${txt}</a>` : `<span class="pill ${cls}" title="${esc(p.error || "")}">${txt}</span>`;
+    return p.url ? `<a class="pill ${cls}" href="${esc(p.url)}" target="_blank" rel="noopener" title="${esc(p.note || "")}">${txt}${p.note ? " · note" : ""}</a>` : `<span class="pill ${cls}" title="${esc(p.error || p.note || "")}">${txt}</span>`;
   }).join("");
 }
 function clipHtml(j, c) {
@@ -1685,7 +1811,7 @@ function clipHtml(j, c) {
   const key = `c:${j.id}:${c.id}`, busyClip = c.status === "queued" || c.status === "rendering";
   return `<article class="clip ${sel().has(key) ? "picked" : ""}">
     <button class="shot" data-act="openclip" ${a} aria-label="Open clip: ${esc(c.title || c.hook)}">${body}
-      <span class="badge l ${scoreCls(c.score)}" title="AI score">${c.score || "Hand"}</span><span class="badge r">${fmt(c.end - c.start)}</span></button>
+      <span class="badge l ${scoreCls(c.score)}" title="AI score">${c.score || "Hand"}</span><span class="badge r">${fmt(c.end - c.start)}</span>${["queued", "making"].includes(c.thumbs?.status) ? `<span class="badge tm">Making thumbnails…</span>` : ""}</button>
     <div class="clip-body">
       <div class="hook">${esc(c.hook || "Untitled clip")}</div>
       <div class="ttl">${esc(c.title)}</div>
@@ -1694,6 +1820,7 @@ function clipHtml(j, c) {
         ${busyClip ? "" : `<label class="selck" title="Select this clip"><input type="checkbox" data-sel="${key}" ${sel().has(key) ? "checked" : ""} aria-label="Select this clip"></label>`}
         ${c.status === "done" ? `<a class="btn sm icon ghost" href="${m}${esc(c.file)}?download=1" title="Download" aria-label="Download">${ic("down")}</a>` : ""}
         <button class="btn sm icon ghost" data-act="copy" ${a} title="Copy post text" aria-label="Copy post text">${ic("copy")}</button>
+        ${c.status === "done" ? `<button class="btn sm icon ghost" data-act="thumbopen" ${a} title="Thumbnails" aria-label="Thumbnails">${ic("image")}</button>` : ""}
         ${busyClip ? "" : `<button class="btn sm icon ghost" data-act="delclip" ${a} title="Delete this clip" aria-label="Delete this clip">${ic("trash")}</button>`}
         <span class="grow"></span>
         ${c.status === "done" ? `<button class="btn sm" data-act="openclip" ${a}>${ic("send")}Post</button>` : ""}
@@ -1771,6 +1898,7 @@ function drawSelBar() {
   put(bar, `<b>${n} selected</b>
     <button class="btn sm" data-act="selall">Select all</button>
     <button class="btn sm primary" data-act="seldl" ${dl ? "" : "disabled"}>${ic("down")}Download${dl ? ` ${dl} clip${dl === 1 ? "" : "s"}` : ""}</button>
+    <button class="btn sm" data-act="selthumbs" ${dl ? "" : "disabled"}>${ic("image")}Thumbnails${dl ? ` (${dl})` : ""}</button>
     <button class="btn sm danger" data-act="seldel">${ic("trash")}Delete</button>
     <button class="btn sm" data-act="selclear">Cancel</button>`);
 }
@@ -1858,6 +1986,7 @@ function drawCreatorForm() {
       </div></div>
     <div class="card"><h2>Clips</h2><p class="help">How this creator's clips look.</p>
       <div class="fields"><label class="sw span"><input type="checkbox" data-k="captions" data-caption-toggle ${c.captions === false ? "" : "checked"}>Generate captions</label>
+        <label class="sw span"><input type="checkbox" data-k="auto_thumbs" ${c.auto_thumbs ? "checked" : ""}><span>Make thumbnails for every new clip<small>Three 9:16 and 16:9 thumbnails per clip. One AI call per clip, a fraction of a cent.</small></span></label>
         <label class="f">Caption style<select data-k="style" data-caption-style ${c.captions === false ? "disabled" : ""}>${opts(S.status.styles, c.style)}</select></label>
         <label class="f">Layout<select data-k="layout">${opts(S.status.layouts, c.layout)}</select></label>
         <label class="f">Game<input data-k="game" value="${esc(c.game || "")}" placeholder="Read from the title"><small class="sub" style="font-weight:400">Left empty, the game is read from the stream's title. Set it for a streamer whose title says nothing: GTA 6, Fortnite, Elden Ring.</small></label>
@@ -1985,7 +2114,8 @@ function drawUsage() {
       <div class="tile"><i>${ic("clock")}</i><b>${(k.today_calls || 0).toLocaleString()}</b><span>AI calls today</span></div>
       <div class="tile"><i>${ic("chart")}</i><b>${fmtK(k.today_tokens)}</b><span>Tokens today</span></div>
       <div class="tile"><i>${ic("scissors")}</i><b>${(k.calls_total || 0).toLocaleString()}</b><span>AI calls in total</span></div>
-      <div class="tile"><i>${ic("receipt")}</i><b>${fmtK(k.tokens_total)}</b><span>Tokens in total</span></div></div>
+      <div class="tile"><i>${ic("receipt")}</i><b>${fmtK(k.tokens_total)}</b><span>Tokens in total</span></div>
+      ${k.images?.images ? `<div class="tile"><i>${ic("image")}</i><b>${k.images.images} · about $${k.images.usd.toFixed(2)}</b><span>AI pictures (about $${k.images.today_usd.toFixed(2)} today)</span></div>` : ""}</div>
     <div class="card"><div class="card-head"><div><h2>Tokens per day</h2><p class="sub">Last 30 days. Your AI provider bills you for these directly.</p></div></div>${tokenChart(k.daily || [])}</div>
     <div class="split">
       <div class="card"><div class="card-head"><div><h2>What it was used for</h2><p class="sub">By kind of AI work, all time</p></div></div>${hbars(k.by_purpose || [])}</div>
@@ -2033,8 +2163,9 @@ async function drawSettings() {
             <label class="f">Model<span class="with"><input id="ai_model" list="ai_models" value="${esc(k.models.join(", "))}" spellcheck="false"><button class="btn" type="button" data-act="aimodels">Find models</button></span>
               <datalist id="ai_models"></datalist><span class="hint">A fast, inexpensive model is the right choice. Add a second one after a comma to fall back on.</span></label>
           </div>
-          <div class="row" style="margin-top:20px"><button class="btn primary" data-act="aisave">Save and test</button>${k.ready ? `<button class="btn" data-act="aitest">Test again</button>` : ""}</div></section>`;
-      aiHints();
+          <div class="row" style="margin-top:20px"><button class="btn primary" data-act="aisave">Save and test</button>${k.ready ? `<button class="btn" data-act="aitest">Test again</button>` : ""}</div></section>
+        <section class="set-sec" id="aiimg"></section>`;
+      aiHints(); drawAiImage();
     }
     if (tab === "profile") {
       const joined = me.created_at ? new Date(me.created_at * 1000).toLocaleDateString([], {day: "numeric", month: "long", year: "numeric"}) : "";
@@ -2152,6 +2283,8 @@ function drawClipDlg(full) {
         <label class="f">Title<input data-f="title" value="${esc(c.title)}"></label>
         <label class="f">Description<textarea data-f="description" rows="2">${esc(c.description)}</textarea></label>
         <button class="btn" data-act="remake">${ic("scissors")}Save and re-make clip</button>
+        <h3 id="thumbhead">Thumbnail</h3>
+        <div id="dthumbs"></div>
         <h3>Post it</h3>
         <div id="dposts" class="row" style="gap:4px"></div>
         ${S.accounts.length ? `<div class="row">${S.accounts.map(a => `<label class="ck"><input type="checkbox" data-pacc value="${esc(a.id)}">${esc(a.label)} · ${esc(a.name)}</label>`).join("")}</div>
@@ -2164,6 +2297,35 @@ function drawClipDlg(full) {
   } else if (D.sig !== sig) $("#stage").innerHTML = stage;
   D.sig = sig;
   put($("#dposts"), postPills(c));
+  const tb = $("#dthumbs"), tsig = JSON.stringify([c.thumbs || null, c.cover, c.status, D.tf]);
+  if (tb && (full || (D.tsig !== tsig && !tb.contains(document.activeElement)))) { tb.innerHTML = thumbsHtml(j, c); D.tsig = tsig; }
+}
+const ACCENTS = ["yellow", "red", "cyan", "green", "orange", "pink", "white"];
+function thumbsHtml(j, c) {
+  const t = c.thumbs || {status: "none"}, m = `/media/${j.id}/`, f = D.tf || "v";
+  if (c.status !== "done") return `<p class="help">Thumbnails can be made once the clip is ready.</p>`;
+  if (t.status === "queued" || t.status === "making") return `<p class="help">${t.status === "queued" ? "Waiting its turn…" : "Making thumbnails… The AI is picking the best moments and writing the words."}</p>`;
+  const make = `<button class="btn" data-act="thumbmake">${ic("image")}${t.status === "done" ? "Make new ones" : "Make thumbnails"}</button>`;
+  if (t.status !== "done") return `${t.status === "error" ? `<p class="err">${esc(t.error || "Could not make thumbnails.")}</p>` : `<p class="help">Three eye-catching pictures for this clip: 9:16 for Shorts, Reels and TikTok, and 16:9 for YouTube. The AI picks the moment and writes the words.</p>`}${make}`;
+  const tiles = t.variants.map((v, i) => {
+    const n = i + 1, on = t.chosen === n, file = v.files[f];
+    return `<div class="tile ${on ? "on" : ""}">
+      <a href="${m}${esc(file)}" target="_blank" rel="noopener"><img src="${m}${esc(file)}" alt="Thumbnail ${n}" loading="lazy"></a>
+      <input data-tw="${n}" value="${esc(v.words)}" maxlength="60" aria-label="Words on thumbnail ${n}">
+      <div class="row"><select data-ta="${n}" aria-label="Colour">${ACCENTS.map(a => `<option ${a === v.accent ? "selected" : ""}>${a}</option>`).join("")}</select>
+        <button class="btn sm" data-act="thumbedit" data-n="${n}" title="Draw again with these words">Redraw</button></div>
+      <div class="row"><button class="btn sm ${on ? "primary" : ""}" data-act="thumbpick" data-n="${on ? "" : n}">${on ? ic("check") + "Cover" : "Use as cover"}</button>
+        <a class="btn sm icon ghost" href="${m}${esc(file)}?download=1" title="Download" aria-label="Download thumbnail ${n}">${ic("down")}</a></div>
+      ${t.restyling && t.restyling.n === n && t.restyling.fmt === f ? `<p class="help" style="margin:0">Making the AI look… up to a minute.</p>`
+        : v.looks?.[f] ? `<button class="btn sm ghost" data-act="thumbunlook" data-n="${n}">Undo AI look</button>`
+        : S.status.ai_image?.on ? `<button class="btn sm" data-act="thumblook" data-n="${n}" ${t.restyling ? "disabled" : ""} title="Repaint with an AI image model. Costs about $${S.status.ai_image.price.toFixed(3)} on your OpenAI account.">${ic("bolt")}AI look · ~$${S.status.ai_image.price.toFixed(2)}</button>` : ""}</div>`;
+  }).join("");
+  const notes = [S.accounts.length ? (t.chosen ? "When posted: YouTube and Instagram get this cover; TikTok only lets PeakCut pick the frame it was made from." : "Posts use the first thumbnail unless you choose one.") : "",
+    t.by === "auto" ? "Picked without the AI (no AI key, or it could not look at pictures)." : "", t.note || "", t.look_error ? "AI look: " + t.look_error : "",
+    t.stale ? "The clip changed since these were made. Make new ones to match it." : ""].filter(Boolean);
+  return `<div class="row" style="justify-content:space-between"><div class="tseg"><button class="${f === "v" ? "on" : ""}" data-act="thumbfmt" data-f="v">9:16 cover</button><button class="${f === "h" ? "on" : ""}" data-act="thumbfmt" data-f="h">16:9 YouTube</button></div>${make}</div>
+    ${notes.length ? `<p class="help">${notes.map(esc).join(" ")}</p>` : ""}
+    <div class="tgrid ${f}">${tiles}</div>`;
 }
 $("#clipdlg").addEventListener("close", () => { $("#clipdlg").innerHTML = ""; D.jid = null; });
 $("#clipdlg").addEventListener("click", e => { if (e.target === e.currentTarget) e.currentTarget.close(); });
@@ -2272,6 +2434,20 @@ document.addEventListener("click", async e => {
       } finally { b.disabled = false; }
       return;
     }
+    if (a === "igsave") {
+      b.disabled = true;
+      try {
+        const body = {provider: $("#ig_provider").value, model: $("#ig_model").value.trim(), quality: $("#ig_quality").value, daily_usd: Number($("#ig_daily").value || 0)};
+        if ($("#ig_usechat")) body.use_chat_key = $("#ig_usechat").checked;
+        if ($("#ig_everyone")) body.everyone = $("#ig_everyone").checked;
+        if ($("#ig_key")?.value) body.key = $("#ig_key").value.trim();
+        await send("/api/ai/image", body, "PUT");
+        let msg = "Saved. AI pictures are off.", kind = "ok";
+        if (body.provider === "openai") { try { const t = await send("/api/ai/image/test"); msg = `Saved. ${t.model} is available on your key (about $${t.price.toFixed(3)} a picture).`; } catch (err) { msg = "Saved, but the check failed. " + err.message; kind = "bad"; } }
+        S.status = await api("/api/status"); await drawAiImage(); toast(msg, kind);
+      } finally { b.disabled = false; }
+      return;
+    }
     if (a === "aisave" || a === "aitest") {
       b.disabled = true;
       try {
@@ -2344,6 +2520,13 @@ document.addEventListener("click", async e => {
     }
     if (a === "dlall") return zipDownload((jobOf(d.j)?.clips || []).filter(c => c.status === "done").map(c => d.j + "." + c.id));
     if (a === "seldl") return zipDownload(selClips());
+    if (a === "selthumbs") {
+      const ids = selClips().slice(0, 50).map(x => x.split("."));
+      if (!ids.length) return toast("None of those clips are ready yet.");
+      const r = await send("/api/thumbs/bulk", {clips: ids});
+      toast(r.queued ? `Making thumbnails for ${r.queued} clip${r.queued === 1 ? "" : "s"}${r.skipped.length ? ` (${r.skipped.length} skipped: already being made)` : ""}.` : (r.skipped[0]?.why || "Nothing to do."), r.queued ? "ok" : "bad");
+      return tick();
+    }
     if (a === "selclear") { sel().clear(); return render(); }
     if (a === "selall") {
       const cid = creatorId();
@@ -2463,6 +2646,24 @@ document.addEventListener("click", async e => {
         body[i.dataset.f] = i.type === "checkbox" ? i.checked : i.type === "number" ? Number(i.value) : i.value;
       });
       await send(`/api/jobs/${D.jid}/clips/${D.cid}/render`, body); toast("Re-making the clip…", "ok"); return tick();
+    }
+    if (a === "cpclose") return $("#chdlg").close();
+    if (a === "cptab") { if (CH.tab === d.tab) return; CH.tab = d.tab; CH.pages = []; return loadChannel(); }
+    if (a === "cpmore") return loadChannel(true);
+    if (a === "cpadd") return addPicked();
+    if (a === "thumbopen") { openClip(d.j, d.c); return setTimeout(() => $("#thumbhead")?.scrollIntoView({block: "start"}), 60); }
+    if (a === "thumbmake") { await send(`/api/jobs/${D.jid}/clips/${D.cid}/thumbs`, {}); toast("Making thumbnails…", "ok"); return tick(); }
+    if (a === "thumbfmt") { D.tf = d.f; return drawClipDlg(false); }
+    if (a === "thumbpick") { await send(`/api/jobs/${D.jid}/clips/${D.cid}/thumbs/choose`, {n: d.n ? Number(d.n) : null}); toast(d.n ? "Cover updated" : "Back to the plain cover", "ok"); return tick(); }
+    if (a === "thumblook") {
+      const f = D.tf || "v", price = S.status.ai_image?.price || 0;
+      if (!await ask("Make an AI look?", `An AI image model repaints thumbnail ${d.n} (${f === "v" ? "9:16" : "16:9"}). This costs about $${price.toFixed(3)} on your OpenAI account.`, "Make it")) return;
+      await send(`/api/jobs/${D.jid}/clips/${D.cid}/thumbs/${d.n}/look`, {fmt: f}); toast("Making the AI look…", "ok"); return tick();
+    }
+    if (a === "thumbunlook") { await api(`/api/jobs/${D.jid}/clips/${D.cid}/thumbs/${d.n}/look?fmt=${D.tf || "v"}`, {method: "DELETE"}); toast("Back to the normal picture", "ok"); return tick(); }
+    if (a === "thumbedit") {
+      const n = d.n, words = $(`#clipdlg [data-tw="${n}"]`).value, accent = $(`#clipdlg [data-ta="${n}"]`).value;
+      await send(`/api/jobs/${D.jid}/clips/${D.cid}/thumbs/${n}`, {words, accent}, "PUT"); document.activeElement?.blur(); toast("Thumbnail redrawn", "ok"); return tick();
     }
     if (a === "postnow" || a === "postqueue") {
       const accs = $$("#clipdlg [data-pacc]:checked").map(i => i.value);

@@ -212,10 +212,12 @@ def _link_key() -> bytes:
 
 
 def clip_link(job_id: str, file_name: str, seconds: int = 3600) -> str:
+    """A one-hour signed address for one clip (.mp4) or one thumbnail (.jpg), for a platform to fetch."""
     body = json.dumps([ctx.uid(), job_id, file_name, int(time.time() + seconds)], separators=(",", ":")).encode()
     b = base64.urlsafe_b64encode(body).decode().rstrip("=")
     sig = base64.urlsafe_b64encode(hmac.new(_link_key(), b.encode(), hashlib.sha256).digest()[:18]).decode().rstrip("=")
-    return f"{config.PUBLIC_URL}/pub/{b}.{sig}.mp4"
+    ext = "jpg" if file_name.endswith(".jpg") else "mp4"
+    return f"{config.PUBLIC_URL}/pub/{b}.{sig}.{ext}"
 
 
 def read_clip_link(token: str):
@@ -226,7 +228,7 @@ def read_clip_link(token: str):
         if not hmac.compare_digest(sig, want):
             return None
         uid, job_id, name, until = json.loads(base64.urlsafe_b64decode(b + "=" * (-len(b) % 4)))
-        if time.time() > until or not re.fullmatch(r"[\w\-]+\.mp4", name):
+        if time.time() > until or not re.fullmatch(r"[\w\-]+\.(mp4|jpg)", name):
             return None
         return uid, job_id, name
     except (ValueError, TypeError):
@@ -355,6 +357,29 @@ def youtube_upload(acc, path: Path, title: str, description: str, tags: list, pr
     return done["id"], f"https://www.youtube.com/shorts/{done['id']}"
 
 
+def youtube_thumbnail(acc, video_id: str, picture: Path):
+    """Set a custom thumbnail on an uploaded video. YouTube only allows it on channels that are verified for
+    custom thumbnails; anything else raises with a plain message, and the post itself still counts."""
+    data = picture.read_bytes()
+    if len(data) > 2_000_000:                      # YouTube's limit is 2 MB: save it again, smaller
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(data)).convert("RGB")
+        for q in (85, 75, 65, 55):
+            out = io.BytesIO()
+            img.save(out, "JPEG", quality=q, optimize=True)
+            if out.tell() <= 2_000_000:
+                data = out.getvalue()
+                break
+    r = httpx.post("https://www.googleapis.com/upload/youtube/v3/thumbnails/set", params={"videoId": video_id},
+                   content=data, headers={"Authorization": f"Bearer {_yt_token(acc)}", "Content-Type": "image/jpeg"}, timeout=120)
+    if r.status_code == 403:
+        raise RuntimeError("YouTube didn't take the custom thumbnail: the channel needs to be verified for custom "
+                           "thumbnails (YouTube Studio, Settings, Channel, Feature eligibility).")
+    if r.status_code >= 400:
+        raise RuntimeError(f"YouTube didn't take the custom thumbnail (HTTP {r.status_code}).")
+
+
 def youtube_views(acc, ids: list) -> dict:
     out = {}
     for i in range(0, len(ids), 50):
@@ -410,19 +435,26 @@ def _ig_token(acc) -> str:
     return acc["token"]
 
 
-def instagram_upload(acc, path: Path, caption: str, job_id: str = ""):
+def instagram_upload(acc, path: Path, caption: str, job_id: str = "", cover: Path | None = None, cover_ms: int | None = None):
     """A Reel. On a public site Instagram fetches the clip from a one-hour signed link; on a computer it cannot
-    reach, the file is sent instead (only possible for some app types)."""
+    reach, the file is sent instead (only possible for some app types). A thumbnail goes along as the cover when
+    Instagram can fetch it; otherwise the cover is the frame at cover_ms."""
     token = _ig_token(acc)
     auth = {"Authorization": f"Bearer {token}"}
     uid = acc["user_id"]
-    if config.PUBLIC_URL.startswith("https://") and job_id:
+    public = config.PUBLIC_URL.startswith("https://") and job_id
+    look = {}
+    if cover and public:
+        look = {"cover_url": clip_link(job_id, cover.name)}
+    elif cover_ms is not None:
+        look = {"thumb_offset": str(int(cover_ms))}
+    if public:
         box = _check(httpx.post(f"{IG}/{uid}/media", data={"media_type": "REELS", "video_url": clip_link(job_id, path.name),
-                                                           "caption": caption[:2200], "share_to_feed": "true"},
+                                                           "caption": caption[:2200], "share_to_feed": "true", **look},
                                 headers=auth, timeout=60), "Starting the Instagram post").json()
     else:
         box = _check(httpx.post(f"{IG}/{uid}/media", data={"media_type": "REELS", "upload_type": "resumable",
-                                                           "caption": caption[:2200], "share_to_feed": "true"},
+                                                           "caption": caption[:2200], "share_to_feed": "true", **look},
                                 headers=auth, timeout=60), "Starting the Instagram upload").json()
         with path.open("rb") as f:
             _check(httpx.post(f"{IG_UPLOAD}/{box['id']}", content=f.read(),
@@ -530,7 +562,7 @@ def _tt_chunks(size: int) -> tuple:
     return 10_000_000, size // 10_000_000
 
 
-def tiktok_upload(acc, path: Path, caption: str, privacy: str = "public"):
+def tiktok_upload(acc, path: Path, caption: str, privacy: str = "public", cover_ms: int | None = None):
     info = _tiktok_creator(acc)
     options = info.get("privacy_level_options") or ["SELF_ONLY"]
     level = next((p for p in TT_PRIVACY.get(privacy, ["SELF_ONLY"]) if p in options), "SELF_ONLY" if "SELF_ONLY" in options else options[0])
@@ -540,7 +572,7 @@ def tiktok_upload(acc, path: Path, caption: str, privacy: str = "public"):
     def init(lv):
         return _tt_post(acc, "/post/publish/video/init/", {
             "post_info": {"title": caption[:2200], "privacy_level": lv, "disable_duet": False, "disable_comment": False,
-                          "disable_stitch": False, "video_cover_timestamp_ms": 1000},
+                          "disable_stitch": False, "video_cover_timestamp_ms": int(cover_ms if cover_ms is not None else 1000)},
             "source_info": {"source": "FILE_UPLOAD", "video_size": size, "chunk_size": chunk, "total_chunk_count": count}},
             "Starting the TikTok post")
     note = ""

@@ -59,6 +59,22 @@ usage = sa.Table(                                                             # 
 )
 
 
+image_usage = sa.Table(                                                       # one row per paid AI picture
+    "image_usage", meta,
+    sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
+    sa.Column("user_id", sa.String(40), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    sa.Column("t", sa.Float, nullable=False),
+    sa.Column("model", sa.String(80), nullable=False),
+    sa.Column("size", sa.String(20), nullable=False),
+    sa.Column("quality", sa.String(10), nullable=False),
+    sa.Column("cost_usd", sa.Float, nullable=False, server_default="0"),       # an estimate: the service's bill is the truth
+    sa.Column("purpose", sa.String(60), nullable=False),
+    sa.Column("creator", sa.String(80)),
+    sa.Column("place", sa.String(200)),
+    sa.Index("image_usage_user_t", "user_id", "t"),
+)
+
+
 email_ok = sa.Table(                                                          # addresses proven to belong to the account
     "email_ok", meta,
     sa.Column("user_id", sa.String(40), primary_key=True),                    # "_existing" marks that older accounts were counted

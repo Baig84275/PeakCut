@@ -187,6 +187,97 @@ with ctx.as_user(user.id):
     accounts._tt_token(accounts.get(ttacc["id"]))
     check("TikTok: an old sign-in is renewed, and the new refresh token kept", accounts.get(ttacc["id"])["refresh_token"], "tt-refresh-2")
 
+# ---- thumbnails go along with a post
+from PIL import Image
+from studio import posting
+Image.new("RGB", (1080, 1920), (200, 30, 30)).save(jd / "clip01-t1-v1.jpg")
+Image.new("RGB", (1080, 1920), (30, 200, 30)).save(jd / "clip01-t1-v2.jpg")
+clipT = {"id": "clip01", "start": 100.0, "end": 130.0, "status": "done", "file": "clip01.mp4", "cover": "clip01.jpg",
+         "thumbs": {"status": "done", "gen": 1, "chosen": 2, "variants": [
+             {"t": 101.0, "files": {"v": "clip01-t1-v1.jpg", "h": "clip01-t1-h1.jpg"}},
+             {"t": 112.5, "files": {"v": "clip01-t1-v2.jpg", "h": "clip01-t1-h2.jpg"}}]}}
+jobT = jobs._jobs["job-12345678"]
+jobT["clips"] = [clipT]
+pic, ms = posting.cover_for(jobT, clipT)
+check("a post uses the chosen thumbnail and its moment in the clip", (pic.name, ms), ("clip01-t1-v2.jpg", 12500))
+clipT["thumbs"]["chosen"] = None
+check("with none chosen, the first one is used", posting.cover_for(jobT, clipT)[0].name, "clip01-t1-v1.jpg")
+check("a clip without thumbnails posts as before", posting.cover_for(jobT, {"start": 0, "end": 5}), (None, None))
+clipT["thumbs"]["chosen"] = 2
+with ctx.as_user(user.id):
+    link = accounts.clip_link("job-12345678", "clip01-t1-v2.jpg")
+    check("a thumbnail gets its own signed .jpg address", link.endswith(".jpg") and link.startswith(BASE + "/pub/"), True)
+    r = anon.get(urlparse(link).path)
+    check("...which serves the picture to the platform, no sign-in", (r.status_code, r.headers["content-type"]), (200, "image/jpeg"))
+    check("...but never as a video", anon.get(urlparse(link).path[:-4] + ".mp4").status_code, 404)
+    vid = accounts.clip_link("job-12345678", "clip01.mp4")
+    check("...and a video address can't be read as a picture", anon.get(urlparse(vid).path[:-4] + ".jpg").status_code, 404)
+
+    calls.clear()
+    accounts.instagram_upload(ig, jd / "clip01.mp4", "My caption", "job-12345678", jd / "clip01-t1-v2.jpg", 12500)
+    made = next(c for c in calls if c[1].endswith("/17841/media"))
+    check("Instagram: the thumbnail goes along as the Reel's cover", made[2].get("cover_url", "").startswith(BASE + "/pub/"), True)
+    old_url = config.PUBLIC_URL
+    config.PUBLIC_URL = "http://127.0.0.1:8765"
+    accounts.PUBLIC_URL = config.PUBLIC_URL
+    calls.clear()
+    try:
+        accounts.instagram_upload(ig, jd / "clip01.mp4", "My caption", "job-12345678", jd / "clip01-t1-v2.jpg", 12500)
+    except Exception:  # noqa: BLE001 - the stand-in has no resumable upload; only the first request matters here
+        pass
+    made = next((c for c in calls if c[1].endswith("/17841/media")), None)
+    check("Instagram from a computer it can't reach: the cover is the thumbnail's frame", (made[2].get("thumb_offset"), "cover_url" in made[2]), ("12500", False))
+    config.PUBLIC_URL = old_url
+
+    tt.update(audited=True, status=0)
+    accounts.tiktok_upload(ttacc, jd / "clip01.mp4", "My caption", "public", 12500)
+    check("TikTok: the cover is the thumbnail's frame (TikTok takes no picture)", tt["init"]["post_info"]["video_cover_timestamp_ms"], 12500)
+    accounts.tiktok_upload(ttacc, jd / "clip01.mp4", "My caption", "public")
+    check("TikTok: without thumbnails, the frame at one second as before", tt["init"]["post_info"]["video_cover_timestamp_ms"], 1000)
+
+    yt = accounts.get(accs["youtube"]["id"])
+    big = jd / "big.jpg"
+    import os as _os
+    Image.frombytes("RGB", (1600, 1600), _os.urandom(1600 * 1600 * 3)).save(big, "JPEG", quality=100)
+    sent = []
+    real_post = accounts.httpx.post
+
+    def yt_post(url, **kw):
+        if "thumbnails/set" in url:
+            sent.append((kw.get("params"), len(kw.get("content") or b""), kw.get("headers", {}).get("Content-Type")))
+            return R(403 if len(sent) > 1 else 200, {})
+        return real_post(url, **kw)
+    accounts.httpx.post = yt_post
+    accounts.youtube_thumbnail(yt, "vid123", big)
+    check("YouTube: the thumbnail is set on the new video, under YouTube's 2 MB limit", (sent[0][0], sent[0][1] <= 2_000_000, sent[0][2]),
+          ({"videoId": "vid123"}, True, "image/jpeg"))
+    try:
+        accounts.youtube_thumbnail(yt, "vid123", jd / "clip01-t1-v2.jpg")
+        check("YouTube: a channel not allowed custom thumbnails gets a plain reason", False)
+    except RuntimeError as e:
+        check("YouTube: a channel not allowed custom thumbnails gets a plain reason", "verified" in str(e), True)
+    accounts.httpx.post = real_post
+
+    # the whole post: a refused thumbnail is a note, never a failed post
+    real_up, real_th = accounts.youtube_upload, accounts.youtube_thumbnail
+    accounts.youtube_upload = lambda *a, **k: ("vid9", "https://www.youtube.com/shorts/vid9")
+    accounts.youtube_thumbnail = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("YouTube didn't take the custom thumbnail: verify"))
+    p = {"id": "post-thumb-1", "platform": "youtube", "job": "job-12345678", "clip": "clip01", "account": yt["id"], "account_name": yt["name"], "creator": None, "tries": 0,
+         "title": "t", "status": "posting", "due_at": 0, "user": user.id}
+    posting._posts.append(p)
+    posting._post(p)
+    check("YouTube: the post counts even when the thumbnail is refused, with a note", (p["status"], "thumbnail" in p.get("note", "")), ("posted", True))
+    # thumbnails still being made: the post waits for them, a few times at most
+    clipT["thumbs"]["status"] = "making"
+    p2 = dict(p, id="post-thumb-2", status="posting", note="", thumb_waits=0)
+    posting._posts.append(p2)
+    posting._post(p2)
+    check("a post waits for thumbnails still being made", (p2["status"], p2["thumb_waits"], p2["due_at"] > time.time() + 60), ("scheduled", 1, True))
+    p2.update(status="posting", thumb_waits=5)
+    posting._post(p2)
+    check("...but not forever", p2["status"], "posted")
+    accounts.youtube_upload, accounts.youtube_thumbnail = real_up, real_th
+
 print("ALL PASSED" if not fails else f"{len(fails)} failed")
 import shutil; db.engine.dispose(); shutil.rmtree(os.environ["PEAKCUT_DATA"], ignore_errors=True)
 sys.exit(1 if fails else 0)
