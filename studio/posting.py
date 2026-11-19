@@ -108,6 +108,11 @@ def _caption(clip, creator):
 def cover_for(job, clip):
     """The thumbnail to post with a clip: the chosen one, else the first. (9:16 picture or None, its moment in
     the clip in milliseconds or None). Nothing when the clip has no thumbnails."""
+    from . import aithumb
+    pic, item = aithumb.chosen_file(job, clip)
+    if pic is not None and pic.is_file():            # an AI-designed thumbnail chosen as the cover
+        ms = int(max(0.0, min(float(clip["end"]) - float(clip["start"]) - 0.1, float(item.get("t", clip["start"])) - float(clip["start"]))) * 1000)
+        return pic, ms
     st = clip.get("thumbs") or {}
     if st.get("status") != "done" or not st.get("variants"):
         return None, None

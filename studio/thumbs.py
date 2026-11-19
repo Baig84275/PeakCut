@@ -35,6 +35,7 @@ FONT = Path(__file__).resolve().parent / "fonts" / "Anton-Regular.ttf"
 ACCENTS = {"yellow": (255, 214, 0), "red": (255, 59, 48), "cyan": (0, 229, 255), "green": (57, 255, 120),
            "orange": (255, 140, 0), "pink": (255, 64, 160), "white": (255, 255, 255)}
 ACCENT_ORDER = list(ACCENTS)
+STYLE_ORDER = ("outline", "banner", "duo")
 MAX_WAITING = 60          # thumbnails one person may have waiting at once
 EDIT_SLOTS = threading.BoundedSemaphore(2)
 
@@ -122,7 +123,9 @@ def source_for(job, clip):
 
 
 def _grab(path: Path, t: float, out: Path) -> bool:
-    cmd = ["ffmpeg", "-y", "-v", "error", "-ss", f"{max(0.0, t):.2f}", "-i", str(path), "-frames:v", "1",
+    seek = ["-i", str(path), "-ss", f"{max(0.0, t):.2f}"] if path.suffix.lower() == ".ts" else \
+        ["-ss", f"{max(0.0, t):.2f}", "-i", str(path)]           # a live piece has no index: read it exactly
+    cmd = ["ffmpeg", "-y", "-v", "error", *seek, "-frames:v", "1",
            "-vf", "scale='min(1920,iw)':-2", "-pix_fmt", "yuvj420p", "-q:v", "2", str(out)]
     try:
         subprocess.run(cmd, capture_output=True, timeout=60, creationflags=NO_WINDOW)
@@ -144,7 +147,35 @@ def _quiet_times(words, start, end) -> list:
     return gaps
 
 
-def times_for(clip, burned: bool) -> list:
+def loud_times(path: Path, off: float, start: float, end: float, n=3) -> list:
+    """The loudest moments of the clip (absolute seconds), at least a second and a half apart: shouting,
+    laughing, a reaction. Empty when the sound can't be read."""
+    cmd = ["ffmpeg", "-v", "error", "-ss", f"{max(0.0, start - off):.2f}", "-t", f"{max(0.5, end - start):.2f}", "-i", str(path),
+           "-vn", "-af", "asetnsamples=n=4800,astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-",
+           "-f", "null", "-"]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=60, creationflags=NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    levels, t = [], None
+    for line in p.stdout.splitlines():
+        m = re.search(r"pts_time:([\d.]+)", line)
+        if m:
+            t = float(m.group(1))
+            continue
+        m = re.search(r"RMS_level=(-?[\d.]+|-inf)", line)
+        if m and t is not None and m.group(1) != "-inf":
+            levels.append((float(m.group(1)), start + t))
+    out = []
+    for level, at in sorted(levels, reverse=True):
+        if all(abs(at - x) >= 1.5 for x in out) and start + 0.3 <= at <= end - 0.3:
+            out.append(at)
+        if len(out) == n:
+            break
+    return sorted(out)
+
+
+def times_for(clip, burned: bool, loud=()) -> list:
     """Which moments of the clip to look at (absolute seconds in the video)."""
     s, e = float(clip["start"]), float(clip["end"])
     dur = max(0.5, e - s)
@@ -160,7 +191,10 @@ def times_for(clip, burned: bool) -> list:
         word = re.sub(r"[^\w]", "", str(w.get("w", ""))).lower()
         if word in punch and s <= float(w["s"]) <= e and all(abs(float(w["e"]) - t) > dur / 12 for t in ts):
             ts.append(min(e - 0.1, float(w["e"]) + 0.15))   # just after the punch word: the reaction
-    return sorted(ts)[:10]
+    for t in loud:
+        if all(abs(t + 0.35 - x) > 0.4 for x in ts):
+            ts.append(min(e - 0.1, t + 0.35))               # just after the loudest moments: the reaction
+    return sorted(ts)[:12]
 
 
 def score(img) -> float:
@@ -244,152 +278,51 @@ def _cover(img, w, h, fx=0.5, fy=0.42, zoom=1.0):
     return big.crop((x, y, x + w, y + h))
 
 
-def _blur_fill(img, w, h, fx=0.5, side="right"):
-    """A tall or square frame in a wide picture: the frame sharp on one side, the rest a blurred copy."""
-    from PIL import Image, ImageFilter
-    bg = _cover(img, w, h, fx).filter(ImageFilter.GaussianBlur(28))
-    fg = img.copy()
-    fg.thumbnail((int(w * 0.55), h), Image.LANCZOS)
-    x = w - fg.width - 40 if side == "right" else 40
-    bg.paste(fg, (max(0, x), (h - fg.height) // 2))
-    return bg
-
-
-def _lines(words: str, font_path, size, max_w):
-    from PIL import ImageFont
-    f = ImageFont.truetype(str(font_path), size)
-    ws = words.split()
-    if not ws:
-        return [], f
-    if len(ws) == 1 or f.getlength(words) <= max_w:
-        return [words], f
-    cut = min(range(1, len(ws)), key=lambda i: max(f.getlength(" ".join(ws[:i])), f.getlength(" ".join(ws[i:]))))
-    return [" ".join(ws[:cut]), " ".join(ws[cut:])], f
-
-
-def _fit(words, max_w, max_h, start, least):
-    """The biggest size at which the words fit the box, on one line or two balanced ones."""
-    size = start
-    while True:
-        lines, f = _lines(words, FONT, size, max_w)
-        widest = max((f.getlength(l) for l in lines), default=0)
-        tall = size * 1.02 * len(lines)
-        if (widest <= max_w and tall <= max_h) or size <= least:
-            return lines, f, size
-        size = max(least, int(size * 0.92))
-
-
-def _shade(img, top, bottom):
-    """A soft dark band behind the words, strongest in the middle, so they read on bright frames too."""
-    from PIL import Image
-    top, bottom = max(0, int(top)), min(img.height, int(bottom))
-    if bottom - top < 4:
-        return
-    h = bottom - top
-    ramp = np.abs(np.linspace(-1.0, 1.0, h, dtype=np.float32))
-    alpha = ((1.0 - ramp ** 2) * 120).astype(np.uint8)
-    mask = Image.fromarray(np.repeat(alpha[:, None], img.width, axis=1), "L")
-    band = Image.new("RGB", (img.width, h), (0, 0, 0))
-    img.paste(band, (0, top), mask)
-
-
-def _draw_words(img, words, accent, box, align="center"):
-    """White words with a thick black outline; the last word in the accent colour."""
-    from PIL import ImageDraw
-    if not words:
-        return img
-    x0, y0, x1, y1 = box
-    lines, f, size = _fit(words, x1 - x0, y1 - y0, start=int((y1 - y0) / 1.6), least=48)
-    line_h = int(size * 1.02)
-    y = y0 + ((y1 - y0) - line_h * len(lines)) // 2
-    _shade(img, y - size // 2, y + line_h * len(lines) + size // 2)
-    d = ImageDraw.Draw(img)
-    stroke = max(4, size // 11)
-    last = len(lines) - 1
-    for i, line in enumerate(lines):
-        parts = line.split()
-        widths = [f.getlength(p) for p in parts]
-        space = f.getlength(" ")
-        total = sum(widths) + space * (len(parts) - 1)
-        x = x0 if align == "left" else x1 - total if align == "right" else x0 + ((x1 - x0) - total) / 2
-        for j, p in enumerate(parts):
-            colour = accent if (i == last and j == len(parts) - 1 and len(words.split()) > 1) else (255, 255, 255)
-            d.text((x, y), p, font=f, fill=colour, stroke_width=stroke, stroke_fill=(0, 0, 0))
-            x += widths[j] + space
-        y += line_h
-    return img
-
-
-def _around(img, fx, fy, part_w, aspect):
-    """A crop of the frame centred on the focus point, part_w of its width, in the given width/height shape."""
-    cw = max(32, min(img.width, int(img.width * part_w)))
-    ch = int(cw / aspect)
-    if ch > img.height:
-        ch = img.height
-        cw = int(ch * aspect)
-    x = int(min(max(0, fx * img.width - cw / 2), img.width - cw))
-    y = int(min(max(0, fy * img.height - ch / 2), img.height - ch))
-    return img.crop((x, y, x + cw, y + ch))
-
-
-def compose(frame, words: str, accent: str, focus=(0.5, 0.42), fmt="v", facecam=None, subject=0.5):
+def compose(frame, words: str, accent: str, focus=(0.5, 0.42), fmt="v", facecam=None, subject=0.5, face=None,
+            style="outline"):
     """One finished thumbnail from a clean frame. fmt "v" is 1080x1920, "h" is 1280x720.
 
-    focus is where the main subject (usually a face) is, 0..1 of the frame; subject is how much of the
-    frame's width it takes up. A small subject in a wide frame (a webcam in the corner of a game) gets the
-    split picture: the subject big on top, the whole scene below."""
-    out, box, align = layout(frame, focus, fmt, facecam, subject)
-    return words_on(out, words, accent, box, align)
+    face is the streamer's (or a person's) face on the frame, as x, y, w, h fractions: when there is one, it is
+    cut out and shown big in front of the scene. Without one, the action is shown, zoomed toward `focus`."""
+    out, box, align = layout(frame, focus, fmt, facecam, subject, face, accent)
+    return words_on(out, words, accent, box, align, style, fmt)
 
 
-def words_on(img, words, accent, box, align):
+def words_on(img, words, accent, box, align, style="outline", fmt="v"):
     """The words drawn on a laid-out picture (the plain one, or one the AI repainted)."""
-    return _draw_words(img.convert("RGB").copy(), words, ACCENTS.get(accent) or ACCENTS["yellow"], box, align)
+    from . import thumbdraw
+    tilt = -3.0 if style == "banner" else (-2.0 if fmt == "h" and style == "outline" else 0.0)
+    return thumbdraw.words(img.convert("RGB"), words, ACCENTS.get(accent) or ACCENTS["yellow"], box, align,
+                           style if style in thumbdraw.STYLES else "outline", tilt)
 
 
-def layout(frame, focus=(0.5, 0.42), fmt="v", facecam=None, subject=0.5):
+def face_box(job, frame, face=None, facecam=None):
+    """Where the face is on this frame (fractions), from the AI's answer or the webcam found in the video."""
+    if face and len(face) == 4 and face[2] > 0.02 and face[3] > 0.02:
+        return [float(v) for v in face]
+    if facecam and len(facecam) == 4 and job.get("width") and job.get("height"):
+        x, y, w, h = facecam
+        return [x / job["width"], y / job["height"], w / job["width"], h / job["height"]]
+    return None
+
+
+def layout(frame, focus=(0.5, 0.42), fmt="v", facecam=None, subject=0.5, face=None, accent="yellow"):
     """The picture without words, and where the words go: (image, text box, alignment)."""
-    from PIL import Image, ImageEnhance, ImageFilter
-    w, h = SIZES[fmt]
+    from . import cutout, thumbdraw
     img = frame.convert("RGB")
     fx, fy = (min(1.0, max(0.0, float(v))) for v in focus)
-    subject = min(1.0, max(0.05, float(subject or 0.5)))
-    tall_source = img.height >= img.width
-    if fmt == "v":
-        split = not tall_source and (facecam or subject <= 0.45)
-        if split:
-            top_h = int(h * 0.5)
-            if facecam:
-                cx, cy, cw, ch = facecam
-                face = img.crop((int(cx), int(cy), int(cx + cw), int(cy + ch)))
-                top = _cover(face, w, top_h)
-            else:
-                top = _cover(_around(img, fx, fy, min(1.0, max(0.22, subject * 1.7)), w / top_h), w, top_h)
-            scene = _cover(img, w, h - top_h, 0.5 if fx < 0.3 or fx > 0.7 else fx, 0.5)
-            out = Image.new("RGB", (w, h))
-            out.paste(top, (0, 0))
-            out.paste(scene, (0, top_h))
-            text_box = (90, top_h + 120, w - 90, min(1400, top_h + 560))
-        else:
-            out = _cover(img, w, h, fx, fy)
-            # where the subject lands in the picture, so the words never sit on the face
-            scale = max(w / img.width, h / img.height)
-            sy = fy * img.height * scale - max(0, min(fy * img.height * scale - h / 2, img.height * scale - h))
-            text_box = (90, 300, w - 90, max(560, min(820, int(sy) - 260))) if sy > h * 0.55 else \
-                (90, max(1000, min(1400 - 240, int(sy) + 340)), w - 90, 1400)
-    else:
-        if tall_source:
-            side = "right" if fx < 0.5 else "left"
-            out = _blur_fill(img, w, h, fx, side)
-            text_box = (64, 64, int(w * 0.48), h - 64) if side == "right" else (int(w * 0.52), 64, w - 64, h - 120)
-        else:
-            out = _cover(img, w, h, fx, fy, zoom=1.12)
-            # words on the side away from the subject; never in the bottom-right corner (the video length badge)
-            text_box = (int(w * 0.5), 64, w - 64, h - 140) if fx < 0.5 else (64, 64, int(w * 0.52), h - 64)
-    out = ImageEnhance.Contrast(ImageEnhance.Color(out).enhance(1.18)).enhance(1.06)
-    out = out.filter(ImageFilter.UnsharpMask(radius=2, percent=60, threshold=3))
-    align = "center" if fmt == "v" else ("left" if text_box[0] < w / 2 else "right")
-    return out, text_box, align
+    colour = ACCENTS.get(accent) or ACCENTS["yellow"]
+    if facecam and not face and img.width and len(facecam) == 4:
+        face = [facecam[0] / img.width, facecam[1] / img.height, facecam[2] / img.width, facecam[3] / img.height]
+    if face:
+        region = thumbdraw.face_region(img, face)
+        if region is not None:
+            person = cutout.person(region)
+            scene = thumbdraw.trim(img) if img.width > img.height else img
+            if person is not None:
+                return thumbdraw.hero(scene, person, colour, fmt, True)
+            return thumbdraw.hero(scene, thumbdraw.card(region, colour), colour, fmt, False)
+    return thumbdraw.action(img, fmt, fx, fy, float(subject or 0.5))
 
 
 def _save(img, path: Path):
@@ -441,11 +374,16 @@ def _ideas(job, clip, frames):
             accent = idea.get("accent") if idea.get("accent") in ACCENTS else ACCENT_ORDER[k % len(ACCENT_ORDER)]
             ideas.append({"frame": fi, "words": clean_words(idea.get("words")) or local[k], "accent": accent,
                           "focus": [idea.get("focus_x", 50) / 100.0, idea.get("focus_y", 42) / 100.0],
-                          "subject": idea.get("subject_w", 50) / 100.0})
+                          "subject": idea.get("subject_w", 50) / 100.0, "face": idea.get("face")})
     how = "ai" if ideas else "auto"
     for k in range(len(ideas), VARIANTS):
         ideas.append({"frame": picked[k], "words": local[k], "accent": ("yellow", "cyan", "red")[k % 3], "focus": [0.5, 0.42],
-                      "subject": 0.6})
+                      "subject": 0.6, "face": None})
+    faces = [i for i in ideas if i.get("face")]
+    if len(faces) >= 2 and ideas[2].get("face"):
+        ideas[2]["face"] = None          # two face-first designs, and one of the action itself, to choose from
+    for k, idea in enumerate(ideas):
+        idea["style"] = STYLE_ORDER[k % len(STYLE_ORDER)]
     return ideas, how
 
 
@@ -478,7 +416,8 @@ def make(jid: str, cid: str):
     try:
         path, off, burned = source_for(job, clip)
         frames = []
-        for k, t in enumerate(times_for(clip, burned)):
+        loud = [] if burned else loud_times(path, off, float(clip["start"]), float(clip["end"]))
+        for k, t in enumerate(times_for(clip, burned, loud)):
             out = work / f"f{k}.jpg"
             if _grab(path, t - off, out):
                 img = Image.open(out)
@@ -486,20 +425,24 @@ def make(jid: str, cid: str):
                 frames.append({"t": round(t, 2), "img": img, "score": score(img)})
         if not frames:
             raise RuntimeError("Could not take any pictures from this clip's video.")
+        for f in frames:                      # just after the loudest moments is where the reaction is
+            if any(0 <= f["t"] - t <= 0.8 for t in loud):
+                f["score"] += 0.15
         frames = sorted(sorted(frames, key=lambda f: -f["score"])[:6], key=lambda f: f["t"])
         ideas, how = _ideas(job, clip, frames)
-        facecam = job.get("facecam") if clip.get("layout") == "gameplay" else None
+        facecam = job.get("facecam")
         made = []
         for n, idea in enumerate(ideas, 1):
             fr = frames[idea["frame"]]
             names = _files(cid, gen, n)
             _save(fr["img"].convert("RGB"), work / names["b"])
+            face = face_box(job, fr["img"], idea.get("face"), facecam if n < 3 else None)
             for fmt in ("v", "h"):
-                cam = facecam if (fmt == "v" and n == 2 and facecam and len(facecam) == 4 and facecam[2] >= 120) else None
-                _save(compose(fr["img"], idea["words"], idea["accent"], idea["focus"], fmt, cam, idea["subject"]), work / names[fmt])
+                _save(compose(fr["img"], idea["words"], idea["accent"], idea["focus"], fmt, None, idea["subject"], face,
+                              idea["style"]), work / names[fmt])
             made.append({"t": fr["t"], "words": idea["words"], "accent": idea["accent"], "focus": idea["focus"],
-                         "subject": idea["subject"],
-                         "kind": "react" if (facecam and n == 2 and facecam[2] >= 120) else "frame",
+                         "subject": idea["subject"], "face": face, "style": idea["style"],
+                         "kind": "face" if face else "action",
                          "base": names["b"], "files": {"v": names["v"], "h": names["h"]}})
         low = max(fr["img"].height for fr in frames) < 600
         _finish(jid, cid, snap, gen, made, how, work, note="Low source quality: thumbnails may look soft." if low else "")
@@ -559,6 +502,8 @@ def choose(job, clip, n):
                 clip["frame_cover"] = clip.get("cover")
             clip["cover"] = st["variants"][n - 1]["files"]["v"]
             st["chosen"] = n
+            if (clip.get("ai_thumbs") or {}).get("chosen"):
+                clip["ai_thumbs"]["chosen"] = None      # one cover at a time
         clip["thumbs"] = st
     jobs.save(job)
 
@@ -607,12 +552,12 @@ def edit(job, clip, n, words=None, accent=None):
 def _draw(folder, base, v, fmt, facecam):
     """One variant in one shape: on its AI look when it has one, otherwise on the plain picture."""
     from PIL import Image
-    out, box, align = layout(base, v["focus"], fmt, facecam if fmt == "v" else None, v.get("subject", 0.5))
+    out, box, align = layout(base, v["focus"], fmt, None, v.get("subject", 0.5), v.get("face"), v["accent"])
     look = (v.get("looks") or {}).get(fmt)
     if look and (folder / look).is_file():
         out = Image.open(folder / look)
         out.load()
-    return words_on(out, v["words"], v["accent"], box, align)
+    return words_on(out, v["words"], v["accent"], box, align, v.get("style", "outline"), fmt)
 
 
 API_SIZES = {"v": ("1024x1536", 1024, 1536), "h": ("1536x1024", 1536, 1024)}
@@ -646,7 +591,7 @@ def make_look(jid, cid, n, fmt, gen):
         base = Image.open(folder / v["base"])
         base.load()
         facecam = job.get("facecam") if v.get("kind") == "react" else None
-        plain, _box, _align = layout(base, v["focus"], fmt, facecam if fmt == "v" else None, v.get("subject", 0.5))
+        plain, _box, _align = layout(base, v["focus"], fmt, None, v.get("subject", 0.5), v.get("face"), v["accent"])
         canvas, (px, py, pw, ph) = _to_api_shape(plain, fmt)
         got = imagegen.repaint(imagegen.to_png(canvas), API_SIZES[fmt][0])
         imagegen.record(imagegen.price(), API_SIZES[fmt][0], creator=job.get("creator"), place=clip.get("title") or job.get("title"))
@@ -717,8 +662,10 @@ def drop_look(job, clip, n, fmt):
 
 
 def remove_files(job, cid):
-    """Every thumbnail file of one clip (when the clip is deleted)."""
+    """Every thumbnail file of one clip (when the clip is deleted), AI-designed ones too."""
+    from . import aithumb
     _remove(Path(job["dir"]) / "clips", cid)
+    aithumb.remove_files(job, cid)
 
 
 def clip_changed(clip):
@@ -735,6 +682,8 @@ def clip_changed(clip):
 
 
 def interrupted(clip):
+    from . import aithumb
+    aithumb.interrupted(clip)
     st = clip.get("thumbs")
     if st and st.get("status") in ("queued", "making"):
         st.update(status="error", error="Interrupted by a restart. Press Make thumbnails again.")
@@ -773,6 +722,9 @@ def _worker():
                     usage.set_context(job.get("creator"), job.get("title"))
                 if action == "look":
                     make_look(jid, cid, *args)
+                elif action == "ai":
+                    from . import aithumb
+                    aithumb.make(jid, cid, *args)
                 else:
                     make(jid, cid)
         except Exception:  # noqa: BLE001

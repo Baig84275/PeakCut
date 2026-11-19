@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import alerts, auth, brain, config, creators, ctx, facecam, games, jobs, load, media, transcribe, usage
+from . import alerts, auth, brain, config, creators, ctx, facecam, games, jobs, load, media, speech_cloud, transcribe, usage
 
 # ":username!user@host PRIVMSG #channel :the message"
 _NICK = re.compile(r"(?m)^:([A-Za-z0-9_]{2,25})!")
@@ -381,18 +381,23 @@ class Session:
 
     # ---------------------------------------------------------------- analysis
     def _transcribe_step(self):
+        cloud = self.settings.get("live_speech") == "cloud" and speech_cloud.ready()
         with self.lock:
             n = len(self.pending) // 2
             hurry = self.ended or bool(self.manual)
-            if n < (SR if hurry else SR * 7):   # about every 7 s, so "what was just said" really is live
+            if n < (SR if hurry else SR * (12 if cloud else 7)):   # local: about every 7 s; online: fewer, longer pieces
                 return False
             audio = np.frombuffer(bytes(self.pending[: n * 2]), dtype=np.int16)
             base = self.pending_base
         cut = n
         if not hurry or n > SR * 24:
-            # cut at the quietest moment between 4 and 6.5 s, so no word is split; the rest waits for the next pass
-            _, cut = next(transcribe._chunks(audio, 4.0, 6.5))
-        words = transcribe.transcribe(audio[:cut])
+            # cut at the quietest moment, so no word is split; the rest waits for the next pass
+            _, cut = next(transcribe._chunks(audio, 8.0, 12.0) if cloud else transcribe._chunks(audio, 4.0, 6.5))
+        words = speech_cloud.transcribe(audio[:cut]) if cloud else None
+        if words is None:                    # local speech, or the online service failed for this piece
+            if cloud:
+                self.job["ai"]["speech_error"] = speech_cloud.last_error
+            words = transcribe.transcribe(audio[:cut])
         off = base / SR
         for w in words:
             w["s"], w["e"] = round(w["s"] + off, 2), round(w["e"] + off, 2)
@@ -461,6 +466,8 @@ class Session:
         must = st["must_clip_min"] > 0 and time.time() - last_clip >= st["must_clip_min"] * 60
         verdict = {"t": round(now), "transcript": None, "reaction": None, "trigger": why}
         if len(win) < 8:
+            if window and why and why.startswith("Jump") and st.get("loud_clips") and len(recent) < st["live_per_hour"]:
+                return self._loud_clip(window, why, verdict)
             self.skipped += 1
             return self._verdict(verdict, "Skipped: nobody talking")
         if len(recent) >= st["live_per_hour"] and not must:
@@ -480,6 +487,8 @@ class Session:
         keep = [c for c in cands if c["score"] >= (40 if must else st["min_score"])]
         verdict["transcript"] = max((c["score"] for c in cands), default=0)
         if not keep:
+            if window and why and why.startswith("Jump") and st.get("loud_clips"):
+                return self._loud_clip(window, why, verdict)
             return self._verdict(verdict, "Words judge: nothing clip-worthy")
         z = brain.loud_zscore(np.array(self.db, dtype=np.float32))
         lo, hi = int(ws), int(now) + 1
@@ -521,6 +530,30 @@ class Session:
             must = False
             if added >= (1 if every <= 2 else 2):
                 break
+
+    def _loud_clip(self, window, why, verdict):
+        """A big reaction (the stream suddenly much louder: shouting, laughing, screaming) is clipped even when the
+        words don't explain it, which is most of the time when the words aren't English. The AI only names it."""
+        st = self.settings
+        spike_t = window[0] + self.AUTO_BEFORE
+        end = min(self.t_done, spike_t + 12)
+        start = max(0.0, min(spike_t - 20, end - st["min_len"]))
+        if end - start > st["max_len"]:
+            start = end - st["max_len"]
+        if any(abs(start - k["start"]) < st["min_gap_min"] * 60 for k in self.job["clips"]):
+            return self._verdict(verdict, "Big reaction, but too close to the last clip")
+        text = " ".join(w["w"] for w in self.words if start <= w["s"] <= end)
+        try:
+            c = brain.describe(text, self.job["title"], self.job["uploader"], game=self._game(), timeout=config.LIVE_AI_TIMEOUT)
+        except Exception as e:  # noqa: BLE001 - a big reaction is clipped even when the AI can't name it
+            self.job["ai"]["last_error"] = str(e)[-200:]
+            c = {"category": "other", "hook": "WAIT FOR IT", "title": self.job["title"], "description": "", "hashtags": [],
+                 "highlight_words": []}
+        c.update(start=round(start, 2), end=round(end, 2), score=max(int(c.get("score") or 0), 55),
+                 reason=f"A big reaction ({why[6:]}).")
+        c["judges"] = {"words": verdict.get("transcript"), "reaction": None, "why": "Big reaction"}
+        self._add_clip(c)
+        return self._verdict(verdict, "Clipped: big reaction (" + why[6:] + ")")
 
     def _verdict(self, v, result):
         self.verdicts.append(dict(v, result=result))

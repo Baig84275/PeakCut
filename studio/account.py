@@ -98,6 +98,11 @@ def zip_clips(clip_ids: list, limit_gb: float = 4.0) -> Path:
             name, n = f"{base} ({n}).mp4", n + 1
         seen.add(name.lower())
         files.append((f, name))
+        from . import aithumb
+        pic, _item = aithumb.chosen_file(job, clip)
+        if pic is not None and pic.is_file():                     # its chosen AI-designed thumbnail
+            total += pic.stat().st_size
+            files.append((pic, f"{name[:-4]} AI cover 9x16.jpg"))
         st = clip.get("thumbs") or {}
         if st.get("status") == "done" and st.get("variants"):     # its thumbnails too: the chosen one, else the first
             v = st["variants"][(st.get("chosen") or 1) - 1]

@@ -26,6 +26,7 @@ PRICES = {
 }
 FALLBACK_PRICE = {"low": 0.02, "medium": 0.07, "high": 0.25}      # an unknown model: assume it costs more, not less
 DEFAULTS = {"provider": "off", "model": "gpt-image-2", "key": "", "use_chat_key": True, "quality": "medium",
+            "design_quality": "high",
             "daily_usd": 1.0, "everyone": False, "base_url": "https://api.openai.com/v1"}
 SERVER_DAILY_USD = float(config.env("PEAKCUT_AI_IMAGE_DAILY_USD", "0") or 0)    # 0 = no limit for the whole server
 PROMPT = ("Make this into a scroll-stopping thumbnail: vivid, punchy colour and lighting, high contrast, crisp detail, "
@@ -77,6 +78,7 @@ def public() -> dict:
             "everyone": c["everyone"], "use_chat_key": c["use_chat_key"], "has_key": bool(own),
             "key_hint": own[-4:] if len(own) >= 8 else "", "chat_is_openai": ai.provider() == "openai",
             "ready": ready(), "price": round(price(), 3), "qualities": list(QUALITIES),
+            "design_quality": c["design_quality"], "design_price": round(price(None, c["design_quality"]), 3),
             "prices": {q: round(price(c["model"], q), 3) for q in QUALITIES},
             "spent_today": round(spent_today(), 3) if ctx.uid_or_none() else 0.0}
 
@@ -94,6 +96,10 @@ def save(body: dict) -> dict:
         if not re.fullmatch(r"[\w.\-:]{1,80}", m):
             raise ValueError("That model name doesn't look right.")
         c["model"] = m
+    if "design_quality" in body:
+        if body["design_quality"] not in QUALITIES:
+            raise ValueError("Choose low, medium or high.")
+        c["design_quality"] = body["design_quality"]
     if "quality" in body:
         if body["quality"] not in QUALITIES:
             raise ValueError("Choose low, medium or high.")
@@ -136,14 +142,14 @@ def spent_today(uid=None, everyone=False) -> float:
         return float(c.execute(q).scalar() or 0.0)
 
 
-def check(is_admin: bool):
+def check(is_admin: bool, cost: float | None = None):
     """Raise NotAllowed with a plain message when this person may not make an AI picture right now."""
     c = current()
     if not ready():
         raise NotAllowed("AI pictures are off. Switch them on in Settings, AI.")
     if not is_admin and not c["everyone"]:
         raise NotAllowed("AI pictures are only for the admin on this server.")
-    cost = price()
+    cost = price() if cost is None else cost
     if c["daily_usd"] and spent_today() + cost > c["daily_usd"] + 1e-9:
         raise NotAllowed(f"Today's limit for AI pictures (${c['daily_usd']:g}) is reached. It resets at midnight, "
                          "or raise it in Settings, AI.")
@@ -151,14 +157,14 @@ def check(is_admin: bool):
         raise NotAllowed("The server's daily limit for AI pictures is reached. Try again tomorrow.")
 
 
-def record(cost: float, size: str, purpose="Thumbnail: AI look", creator=None, place=None):
+def record(cost: float, size: str, purpose="Thumbnail: AI look", creator=None, place=None, quality=None):
     uid = ctx.uid_or_none()
     if not uid:
         return
     c = current()
     with db.engine.begin() as conn:
         conn.execute(db.image_usage.insert().values(user_id=uid, t=time.time(), model=c["model"][:80], size=size[:20],
-                                                    quality=c["quality"], cost_usd=float(cost), purpose=purpose[:60],
+                                                    quality=quality or c["quality"], cost_usd=float(cost), purpose=purpose[:60],
                                                     creator=creator, place=(place or "")[:200]))
     ctx.bump(uid)
 
@@ -196,15 +202,27 @@ def _explain(r) -> str:
 
 def repaint(png: bytes, size: str) -> bytes:
     """Send one picture (PNG) to the image model and get the repainted one back as image bytes."""
+    return _edit([("thumb.png", png)], PROMPT, size, current()["quality"])
+
+
+def design(images: list, prompt: str, size: str) -> bytes:
+    """A whole new picture from a few reference pictures [(name, PNG bytes)] and a written design, at the
+    design quality (high by default: sharp text matters most here)."""
+    return _edit(images, prompt, size, current()["design_quality"])
+
+
+def _edit(images: list, prompt: str, size: str, quality: str) -> bytes:
     c = current()
     base = (c["base_url"] or DEFAULTS["base_url"]).rstrip("/")
     tries = [{"input_fidelity": "high", "output_format": "jpeg"}, {"output_format": "jpeg"}, {}]
     last = None
+    many = len(images) > 1
     for extra in tries:          # newer and older models accept different optional settings: drop them one by one
-        data = {"model": c["model"], "prompt": PROMPT, "size": size, "quality": c["quality"], "n": "1", **extra}
+        data = {"model": c["model"], "prompt": prompt, "size": size, "quality": quality, "n": "1", **extra}
+        files = [("image[]" if many else "image", (name, png, "image/png")) for name, png in images]
         try:
             r = httpx.post(f"{base}/images/edits", headers={"Authorization": f"Bearer {key()}"}, data=data,
-                           files={"image": ("thumb.png", png, "image/png")}, timeout=180)
+                           files=files, timeout=300)
         except httpx.HTTPError as e:
             raise RuntimeError("Couldn't reach the AI picture service. Check the internet connection.") from e
         last = r

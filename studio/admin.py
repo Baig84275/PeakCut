@@ -6,6 +6,7 @@ change it, and no email address is special in the code. It is set by hand, on th
     python -m studio.admin list
     python -m studio.admin grant someone@example.com
     python -m studio.admin revoke someone@example.com
+    python -m studio.admin owner you@example.com      (sign-in for the account that owns everything made so far)
 
 Admins see accounts and AI use. They do not see anyone's videos, clips or connected accounts."""
 import shutil
@@ -152,8 +153,44 @@ def set_admin(email: str, on: bool) -> bool:
     return True
 
 
+def claim_owner(email: str, password: str) -> str:
+    """Give the account that owns everything made with sign-in off (the oldest one) an email and a password, so
+    that switching sign-in on keeps all its videos, clips and settings. Returns the account id."""
+    from . import auth
+    email = email.strip().lower()
+    if "@" not in email or len(email) > 254 or any(ch.isspace() for ch in email):
+        raise ValueError("That email doesn't look right.")
+    auth._check_password_rules(password)
+    with db.engine.begin() as c:
+        owner = c.execute(sa.select(db.users).order_by(db.users.c.created_at).limit(1)).first()
+        if not owner:
+            raise ValueError("There is no owner account yet. Start PeakCut once with sign-in off first.")
+        taken = c.execute(sa.select(db.users).where(db.users.c.email == email, db.users.c.id != owner.id)).first()
+        if taken:
+            raise ValueError("Another account already uses that email.")
+        c.execute(db.users.update().where(db.users.c.id == owner.id).values(
+            email=email, password_hash=auth.hash_password(password), is_admin=True, disabled=False))
+        c.execute(db.sessions.delete().where(db.sessions.c.user_id == owner.id))
+        _log(c, owner.id, "owner:claimed", owner.id, "email and password set from the server command line")
+    auth.mark_verified(owner.id)
+    return owner.id
+
+
 def _cli(argv):
     db.init()
+    if argv[:1] == ["owner"] and len(argv) == 2:
+        import getpass
+        first = getpass.getpass("New password for the owner account (not shown): ")
+        if getpass.getpass("Type it again: ") != first:
+            print("The two passwords don't match. Nothing was changed.")
+            return 1
+        try:
+            claim_owner(argv[1], first)
+        except Exception as e:  # noqa: BLE001
+            print(str(e))
+            return 1
+        print(f"Done. Sign in as {argv[1].strip().lower()} once sign-in is on: everything you made is still yours.")
+        return 0
     if argv[:1] == ["list"]:
         with db.engine.connect() as c:
             for r in c.execute(sa.select(db.users).order_by(db.users.c.created_at)):

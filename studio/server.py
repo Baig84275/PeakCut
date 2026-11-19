@@ -304,7 +304,8 @@ def _image_status(u) -> dict:
     if not imagegen.ready():
         return {"on": False}
     c = imagegen.current()
-    return {"on": bool(u.is_admin or c["everyone"]), "price": round(imagegen.price(), 3)}
+    return {"on": bool(u.is_admin or c["everyone"]), "price": round(imagegen.price(), 3),
+            "design_price": round(imagegen.price(None, c["design_quality"]), 3)}
 
 
 def _admin(request: Request):
@@ -1020,6 +1021,52 @@ def choose_thumb(jid: str, cid: str, body: dict = Body(...)):
         raise HTTPException(409, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
+    return jobs.public(job)
+
+
+@app.post("/api/jobs/{jid}/clips/{cid}/aithumbs")
+def make_ai_thumb(request: Request, jid: str, cid: str, body: dict = Body(...)):
+    """An AI-designed thumbnail (the image model draws all of it). Paid: about $0.17 at high quality."""
+    from . import aithumb, imagegen
+    job, clip = _clip_or_404(jid, cid)
+    _throttle("aithumb:" + ctx.uid(), 10, 600, "That's a lot of AI thumbnails in a short time. Wait a few minutes.")
+    _quota()
+    u = _me(request)
+    try:
+        aithumb.request(job, clip, str(body.get("fmt") or "v"), bool(u and u.is_admin and not u.disabled))
+    except imagegen.NotAllowed as e:
+        raise HTTPException(403, str(e))
+    except aithumb.Busy as e:
+        raise HTTPException(409, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return jobs.public(job)
+
+
+@app.post("/api/jobs/{jid}/clips/{cid}/aithumbs/choose")
+def choose_ai_thumb(jid: str, cid: str, body: dict = Body(...)):
+    from . import aithumb
+    job, clip = _clip_or_404(jid, cid)
+    item = body.get("id")
+    if item is not None and not re.fullmatch(r"\d{1,12}", str(item)):
+        raise HTTPException(400, "No such AI thumbnail.")
+    try:
+        aithumb.choose(job, clip, None if item is None else str(item))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return jobs.public(job)
+
+
+@app.delete("/api/jobs/{jid}/clips/{cid}/aithumbs/{item}")
+def delete_ai_thumb(jid: str, cid: str, item: str):
+    from . import aithumb
+    job, clip = _clip_or_404(jid, cid)
+    if not re.fullmatch(r"\d{1,12}", item):
+        raise HTTPException(404)
+    try:
+        aithumb.delete(job, clip, item)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
     return jobs.public(job)
 
 

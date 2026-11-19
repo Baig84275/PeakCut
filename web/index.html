@@ -607,6 +607,7 @@ dialog::backdrop{background:rgba(14,12,11,.42);animation:fadein .16s ease}
 .tgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.tgrid.h{grid-template-columns:1fr}
 .tile{display:flex;flex-direction:column;gap:6px;padding:6px;border-radius:var(--r-sm);background:var(--muted);border:2px solid transparent;min-width:0}
 .tile.on{border-color:var(--brand)}
+.aibox{padding:12px;border-radius:var(--r);background:var(--brand-soft);margin-bottom:12px}
 .tile img{width:100%;border-radius:6px;display:block;background:#000;cursor:zoom-in}
 .tile input,.tile select{height:32px;font-size:13px}
 .tile .row{gap:4px;flex-wrap:nowrap}
@@ -1711,7 +1712,8 @@ async function drawAiImage() {
       <label class="f">AI pictures<select id="ig_provider"><option value="off" ${g.provider === "off" ? "selected" : ""}>Off</option><option value="openai" ${g.provider === "openai" ? "selected" : ""}>OpenAI</option></select></label>
       <label class="f">Model<input id="ig_model" value="${esc(g.model)}" list="ig_models" spellcheck="false"><datalist id="ig_models"><option value="gpt-image-2"><option value="gpt-image-1.5"><option value="gpt-image-1-mini"></datalist>
         <span class="hint">gpt-image-2 is a good choice.</span></label>
-      <label class="f">Quality<select id="ig_quality">${g.qualities.map(q => `<option value="${q}" ${q === g.quality ? "selected" : ""}>${q[0].toUpperCase() + q.slice(1)} · about $${g.prices[q].toFixed(3)} a picture</option>`).join("")}</select></label>
+      <label class="f">AI thumbnail quality<select id="ig_dquality">${g.qualities.map(q => `<option value="${q}" ${q === g.design_quality ? "selected" : ""}>${q[0].toUpperCase() + q.slice(1)} · about $${g.prices[q].toFixed(3)} a thumbnail</option>`).join("")}</select><span class="hint">High gives the sharpest text. Used for full AI-designed thumbnails.</span></label>
+      <label class="f">AI look quality<select id="ig_quality">${g.qualities.map(q => `<option value="${q}" ${q === g.quality ? "selected" : ""}>${q[0].toUpperCase() + q.slice(1)} · about $${g.prices[q].toFixed(3)} a picture</option>`).join("")}</select></label>
       ${g.chat_is_openai ? `<label class="ck"><input type="checkbox" id="ig_usechat" ${g.use_chat_key ? "checked" : ""}>Use the OpenAI key from above</label>` : ""}
       <label class="f" id="ig_keywrap" ${own ? "" : "hidden"}>OpenAI key for pictures<input id="ig_key" type="password" autocomplete="off" spellcheck="false" placeholder="${g.has_key ? "Saved, ending " + esc(g.key_hint) + ". Leave empty to keep it." : "sk-..."}"></label>
       <label class="f">Daily limit (US dollars)<input id="ig_daily" type="number" min="0" step="0.5" value="${g.daily_usd}"><span class="hint">No more AI pictures once today's spend reaches this. 0 means no limit.</span></label>
@@ -1977,15 +1979,20 @@ function drawCreatorForm() {
       <div class="fields">
         <label class="f">Check the live stream every<select data-k="ai_every_min">${opts({1:"1 minute", 2:"2 minutes", 3:"3 minutes", 5:"5 minutes", 10:"10 minutes"}, c.ai_every_min || 3)}</select><small class="sub" id="costhint" style="font-weight:400">${costHint(c.ai_every_min)}</small></label>
         <p class="help span" style="margin:0">On top of that, the AI always looks straight away when the stream suddenly gets louder or chat gets busier, and when someone says "clip" or "clip it".</p>
+        <label class="f span">Understanding what the streamer says<select data-k="live_speech">${opts({local:"On this computer: English only, free", cloud:"OpenAI: any language (Hindi, Urdu, Hinglish...), about $0.18 an hour"}, c.live_speech || "local")}</select>
+          <small class="sub" style="font-weight:400">The speech model on this computer only understands English. For a streamer who speaks Hindi or Urdu, choose OpenAI, or the AI reads nonsense and finds nothing to clip. Uses the OpenAI key from Settings, AI.</small></label>
+        <label class="sw span"><input type="checkbox" data-k="loud_clips" ${c.loud_clips ? "checked" : ""}><span>Also clip big reactions<small>When the stream suddenly gets much louder (shouting, laughing, screaming), clip it even if the words don't explain it. The AI only writes the title.</small></span></label>
         <label class="f">Most live clips per hour<input data-k="live_per_hour" type="number" min="1" max="60" value="${c.live_per_hour}"></label>
         <label class="f">Make a clip when<select data-k="decide_mode">${opts({both:"Both judges say yes", either:"Both say yes, or the words judge is very sure (90+)"}, c.decide_mode)}</select></label>
         <label class="f">Words judge must score at least<input data-k="min_score" type="number" min="0" max="100" value="${c.min_score}"></label>
-        <label class="f">Make sure there's a live clip at least every<select data-k="must_clip_min">${opts({0:"Off", 15:"15 minutes", 30:"30 minutes", 60:"1 hour", 120:"2 hours"}, c.must_clip_min)}</select></label>
+        <label class="f">Make sure there's a live clip at least every<select data-k="must_clip_min">${opts({0:"Off", 10:"10 minutes", 15:"15 minutes", 30:"30 minutes", 60:"1 hour", 120:"2 hours"}, c.must_clip_min)}</select></label>
         <label class="f">Minimum gap between live clips (minutes)<input data-k="min_gap_min" type="number" min="0" max="60" value="${c.min_gap_min}"></label>
         <label class="f span">Always clip the last 30 seconds when someone says<input data-k="trigger_words" value="${esc(c.trigger_words)}" placeholder="clip that, clip it"><small class="sub" style="font-weight:400">Separate phrases with commas. Matched on the transcript, so it needs no AI call.</small></label>
       </div></div>
     <div class="card"><h2>Clips</h2><p class="help">How this creator's clips look.</p>
       <div class="fields"><label class="sw span"><input type="checkbox" data-k="captions" data-caption-toggle ${c.captions === false ? "" : "checked"}>Generate captions</label>
+        <label class="f">Name on the thumbnail badge<input data-k="brand_name" value="${esc(c.brand_name || "")}" maxlength="24" placeholder="The stream's channel name"><small class="sub" style="font-weight:400">Shown on AI thumbnails with a play-button badge. Left empty, the channel's own name is used.</small></label>
+        <label class="f">AI thumbnail colours<select data-k="brand_style">${opts({auto:"Automatic (from the game)", vice:"Neon purple and pink (Vice City)", fire:"Orange and red fire", ice:"Electric blue", gold:"Black and gold"}, c.brand_style || "auto")}</select></label>
         <label class="sw span"><input type="checkbox" data-k="auto_thumbs" ${c.auto_thumbs ? "checked" : ""}><span>Make thumbnails for every new clip<small>Three 9:16 and 16:9 thumbnails per clip. One AI call per clip, a fraction of a cent.</small></span></label>
         <label class="f">Caption style<select data-k="style" data-caption-style ${c.captions === false ? "disabled" : ""}>${opts(S.status.styles, c.style)}</select></label>
         <label class="f">Layout<select data-k="layout">${opts(S.status.layouts, c.layout)}</select></label>
@@ -2297,11 +2304,34 @@ function drawClipDlg(full) {
   } else if (D.sig !== sig) $("#stage").innerHTML = stage;
   D.sig = sig;
   put($("#dposts"), postPills(c));
-  const tb = $("#dthumbs"), tsig = JSON.stringify([c.thumbs || null, c.cover, c.status, D.tf]);
+  const tb = $("#dthumbs"), tsig = JSON.stringify([c.thumbs || null, c.ai_thumbs || null, c.cover, c.status, D.tf, S.status.ai_image]);
   if (tb && (full || (D.tsig !== tsig && !tb.contains(document.activeElement)))) { tb.innerHTML = thumbsHtml(j, c); D.tsig = tsig; }
 }
 const ACCENTS = ["yellow", "red", "cyan", "green", "orange", "pink", "white"];
-function thumbsHtml(j, c) {
+function thumbsHtml(j, c) { return aiThumbsHtml(j, c) + plainThumbsHtml(j, c); }
+function aiThumbsHtml(j, c) {
+  if (c.status !== "done") return "";
+  const a = c.ai_thumbs || {status: "none", items: []}, m = `/media/${j.id}/`, f = D.tf || "v", on = S.status.ai_image?.on;
+  const price = S.status.ai_image?.design_price ?? 0.17;
+  const items = (a.items || []).filter(i => i.fmt === f);
+  const busy = a.status === "queued" || a.status === "making";
+  const tiles = items.map(i => {
+    const chosen = a.chosen === i.id;
+    return `<div class="tile ${chosen ? "on" : ""}"><a href="${m}${esc(i.file)}" target="_blank" rel="noopener"><img src="${m}${esc(i.file)}" alt="${esc(i.headline)}" loading="lazy"></a>
+      <div class="row">${i.fmt === "v" ? `<button class="btn sm ${chosen ? "primary" : ""}" data-act="aipick" data-id="${chosen ? "" : esc(i.id)}">${chosen ? ic("check") + "Cover" : "Use as cover"}</button>` : ""}
+        <a class="btn sm icon ghost" href="${m}${esc(i.file)}?download=1" title="Download" aria-label="Download">${ic("down")}</a>
+        <button class="btn sm icon ghost" data-act="aidel" data-id="${esc(i.id)}" title="Delete" aria-label="Delete this AI thumbnail">${ic("trash")}</button></div></div>`;
+  }).join("");
+  return `<div class="aibox"><div class="row" style="justify-content:space-between"><b>AI thumbnail</b>
+      <div class="tseg"><button class="${f === "v" ? "on" : ""}" data-act="thumbfmt" data-f="v">9:16</button><button class="${f === "h" ? "on" : ""}" data-act="thumbfmt" data-f="h">16:9</button></div>
+      ${on ? `<button class="btn sm primary" data-act="aimake" ${busy ? "disabled" : ""}>${ic("bolt")}${items.length ? "Make another" : "Make AI thumbnail"} · ~$${price.toFixed(2)}</button>` : ""}</div>
+    <p class="help" style="margin:4px 0 8px">${on ? `The AI draws the whole thumbnail: the streamer's face big, the game moment, a bold headline, the game's name and the channel badge (set the name and colours in the creator's Setup). ${f === "v" ? "9:16" : "16:9"}, about $${price.toFixed(2)} each on your OpenAI account. Check the face looks right before posting.`
+      : "Full AI-designed thumbnails, like popular gaming channels use, need AI pictures switched on in Settings, AI."}</p>
+    ${busy ? `<p class="help">Designing your AI thumbnail… this takes up to 2 minutes.</p>` : ""}
+    ${a.status === "error" ? `<p class="err">${esc(a.error || "Could not make the AI thumbnail.")}</p>` : ""}
+    ${tiles ? `<div class="tgrid ${f}">${tiles}</div>` : ""}</div>`;
+}
+function plainThumbsHtml(j, c) {
   const t = c.thumbs || {status: "none"}, m = `/media/${j.id}/`, f = D.tf || "v";
   if (c.status !== "done") return `<p class="help">Thumbnails can be made once the clip is ready.</p>`;
   if (t.status === "queued" || t.status === "making") return `<p class="help">${t.status === "queued" ? "Waiting its turn…" : "Making thumbnails… The AI is picking the best moments and writing the words."}</p>`;
@@ -2437,7 +2467,7 @@ document.addEventListener("click", async e => {
     if (a === "igsave") {
       b.disabled = true;
       try {
-        const body = {provider: $("#ig_provider").value, model: $("#ig_model").value.trim(), quality: $("#ig_quality").value, daily_usd: Number($("#ig_daily").value || 0)};
+        const body = {provider: $("#ig_provider").value, model: $("#ig_model").value.trim(), quality: $("#ig_quality").value, design_quality: $("#ig_dquality").value, daily_usd: Number($("#ig_daily").value || 0)};
         if ($("#ig_usechat")) body.use_chat_key = $("#ig_usechat").checked;
         if ($("#ig_everyone")) body.everyone = $("#ig_everyone").checked;
         if ($("#ig_key")?.value) body.key = $("#ig_key").value.trim();
@@ -2661,6 +2691,16 @@ document.addEventListener("click", async e => {
       await send(`/api/jobs/${D.jid}/clips/${D.cid}/thumbs/${d.n}/look`, {fmt: f}); toast("Making the AI look…", "ok"); return tick();
     }
     if (a === "thumbunlook") { await api(`/api/jobs/${D.jid}/clips/${D.cid}/thumbs/${d.n}/look?fmt=${D.tf || "v"}`, {method: "DELETE"}); toast("Back to the normal picture", "ok"); return tick(); }
+    if (a === "aimake") {
+      const f = D.tf || "v", price = S.status.ai_image?.design_price ?? 0.17;
+      if (!await ask("Make an AI thumbnail?", `The AI draws a full ${f === "v" ? "9:16" : "16:9"} thumbnail for this clip. This costs about $${price.toFixed(2)} on your OpenAI account and takes up to 2 minutes.`, "Make it")) return;
+      await send(`/api/jobs/${D.jid}/clips/${D.cid}/aithumbs`, {fmt: f}); toast("Designing your AI thumbnail…", "ok"); return tick();
+    }
+    if (a === "aipick") { await send(`/api/jobs/${D.jid}/clips/${D.cid}/aithumbs/choose`, {id: d.id || null}); toast(d.id ? "Cover updated" : "Back to the plain cover", "ok"); return tick(); }
+    if (a === "aidel") {
+      if (!await ask("Delete this AI thumbnail?", "It can't be brought back; making a new one costs again.", "Delete", true)) return;
+      await api(`/api/jobs/${D.jid}/clips/${D.cid}/aithumbs/${d.id}`, {method: "DELETE"}); return tick();
+    }
     if (a === "thumbedit") {
       const n = d.n, words = $(`#clipdlg [data-tw="${n}"]`).value, accent = $(`#clipdlg [data-ta="${n}"]`).value;
       await send(`/api/jobs/${D.jid}/clips/${D.cid}/thumbs/${n}`, {words, accent}, "PUT"); document.activeElement?.blur(); toast("Thumbnail redrawn", "ok"); return tick();

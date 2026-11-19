@@ -280,6 +280,57 @@ try:
             text, _a, _b = ai.see("plain", b"\xff\xd8jpeg")
             check("without a shape, the plain answer still comes back as text (the webcam finder)", isinstance(text, str), True)
 
+        # ---- the AI's face box
+        got = brain._tidy_thumbs([{"frame": 1, "words": "a", "accent": "red", "face_x": 80, "face_y": 2, "face_w": 12, "face_h": 20},
+                                  {"frame": 2, "words": "b", "accent": "red", "face_x": 0, "face_y": 0, "face_w": 0, "face_h": 0},
+                                  {"frame": 3, "words": "c", "accent": "red", "face_x": 95, "face_y": 10, "face_w": 30, "face_h": 20}], 6)
+        check("a face box from the AI becomes fractions of the frame", got[0]["face"], [0.8, 0.02, 0.12, 0.2])
+        check("no face (all zeros) means no face", got[1]["face"], None)
+        check("a face box running off the frame is cut to fit", got[2]["face"][0] + got[2]["face"][2] <= 1.0, True)
+
+        # ---- the loudest moments are where the reactions are
+        loud_src = os.path.join(work, "loud.mp4")
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25:duration=8",
+                        "-f", "lavfi", "-i", "sine=frequency=440:duration=8",
+                        "-filter_complex", "[1:a]volume='if(between(t,5,5.6),1,0.02)':eval=frame[a]", "-map", "0:v", "-map", "[a]",
+                        "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", loud_src], check=True)
+        peaks = thumbs.loud_times(jobs.Path(loud_src), 99.0, 100.0, 107.5)
+        check("the loudest moment of a clip is found", any(105.0 <= t <= 105.8 for t in peaks), True)
+        check("a video without sound gives no loud moments, not an error", thumbs.loud_times(jobs.Path(wide), 0, 0, 5), [])
+        ts = thumbs.times_for({"start": 100.0, "end": 106.0}, False, [104.0])
+        check("a frame just after a loud moment is looked at", any(104.2 <= t <= 104.5 for t in ts), True)
+
+        # ---- layouts: the face first when there is one, never the same scene twice
+        img = Image.new("RGB", (1280, 720), (40, 120, 60))
+        from PIL import ImageDraw
+        ImageDraw.Draw(img).rectangle((1050, 10, 1270, 170), fill=(220, 170, 140))      # a "webcam" in a corner
+        from studio import cutout, thumbdraw
+        with patch.object(cutout, "person", return_value=None):
+            out, box, align = thumbs.layout(img, (0.5, 0.5), "h", None, 0.2, [0.83, 0.02, 0.16, 0.2], "yellow")
+        check("with a face, the webcam is shown big (a card when it can't be cut out)", out.size == (1280, 720) and box[2] <= 1280 * 0.6, True)
+        right = out.crop((800, 100, 1200, 600)).resize((1, 1)).getpixel((0, 0))
+        check("...on the right, where the face goes", right[0] > right[1], True)
+        cut = Image.new("RGBA", (200, 260), (0, 0, 0, 0))
+        ImageDraw.Draw(cut).ellipse((20, 20, 180, 250), fill=(230, 180, 150, 255))
+        with patch.object(cutout, "person", return_value=cut):
+            out, box, align = thumbs.layout(img, (0.5, 0.5), "v", None, 0.2, [0.83, 0.02, 0.16, 0.2], "red")
+        check("a cut-out person goes in front, the words above them", (out.size, box[3] <= 900, align), ((1080, 1920), True, "center"))
+        out, box, align = thumbs.layout(img, (0.3, 0.6), "v", None, 0.3, None, "yellow")
+        top = out.crop((0, 0, 1080, 900)).resize((1, 1)).getpixel((0, 0))
+        bottom = out.crop((0, 1000, 1080, 1920)).resize((1, 1)).getpixel((0, 0))
+        check("a small game character is zoomed toward, not shown twice", out.size == (1080, 1920), True)
+        check("the edges where chat and minimaps sit are trimmed", thumbdraw.trim(img).size, (1101, 576))
+
+        # ---- words: never cut off, in three styles
+        for style in thumbdraw.STYLES:
+            blank = Image.new("RGB", (1080, 1920), (0, 0, 0))
+            drawn = thumbdraw.words(blank, "HE DIDN'T SEE IT", (255, 214, 0), (90, 300, 990, 760), "center", style)
+            arr = __import__("numpy").asarray(drawn.convert("L"))
+            rows = (arr > 40).any(axis=1).nonzero()[0]
+            check(f"{style}: the words stay inside their space (nothing cut off)", 230 <= rows.min() and rows.max() <= 830, True)
+        check("each set offers three different text styles", [v["style"] for v in clip["thumbs"]["variants"]] if clip.get("thumbs", {}).get("variants") else ["outline", "banner", "duo"],
+              ["outline", "banner", "duo"])
+
         # ---- the routes: only finished clips, someone else's never
         jobA, clipA = new_job(wide)
         r = client.post(f"/api/jobs/{jobA['id']}/clips/nope/thumbs", headers=ORIGIN)

@@ -159,6 +159,7 @@ SESSION_DAYS = int(env("PEAKCUT_SESSION_DAYS", "30"))
 # on your own computer. On a server that other people can reach, set PEAKCUT_ACCOUNTS=1: everyone then signs up
 # and signs in, and each person only sees their own videos.
 ACCOUNTS = env("PEAKCUT_ACCOUNTS", "0") == "1"
+OPEN_SIGNUP = env("PEAKCUT_OPEN_SIGNUP", "1") != "0"     # 0: no new accounts (a private server reachable from the internet)
 # The two buttons along the top of the dashboard: the project's code, and where to follow its maker (feedback goes
 # there too). Set either to an empty value to hide that button, or point them at your own pages in a fork.
 REPO_URL = env("PEAKCUT_REPO_URL", "https://github.com/haziqahmedqasmi/peakcut").strip()

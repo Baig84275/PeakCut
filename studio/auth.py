@@ -182,6 +182,8 @@ def user_ids() -> list:
 
 
 def _create(email: str, name: str, password_hash=None, google_sub=None):
+    if not config.OPEN_SIGNUP:
+        raise AuthError("New accounts are closed on this server. Ask its owner for access.")
     email = email.strip().lower()
     if not EMAIL_RE.match(email):
         raise AuthError("Enter a valid email address.")

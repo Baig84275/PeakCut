@@ -68,7 +68,10 @@ def main() -> int:
                 ("long logs, the machine monitor, failed recordings, admin day totals", ["tests/test_robustness.py"]),
                 ("thumbnails for clips", ["tests/test_thumbs.py"]),
                 ("picking videos from a channel link", ["tests/test_channels.py"]),
-                ("the paid AI look for thumbnails", ["tests/test_imagegen.py"])]
+                ("the paid AI look for thumbnails", ["tests/test_imagegen.py"]),
+                ("live streams in any language, and big reactions", ["tests/test_live_speech.py"]),
+                ("live clips move from their first frame", ["tests/test_live_seek.py"]),
+                ("AI-designed thumbnails", ["tests/test_aithumb.py"])]
         for name, args in runs:
             print(f"\n=== {name} ===", flush=True)
             r = subprocess.run([sys.executable, *args], cwd=ROOT, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
